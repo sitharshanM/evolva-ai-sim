@@ -1,0 +1,29 @@
+# Build artifacts
+build/
+bin/
+*.exe
+*.o
+*.obj
+*.pdb
+*.ilk
+*.idb
+
+# Sensitive API keys & secrets
+.env
+*.env
+*_key.txt
+*key*.txt
+gemini_key.txt
+nemotron_key.txt
+openrouter*.txt
+
+# Editor and UI configs
+imgui.ini
+.vscode/
+.idea/
+.vs/
+*.user
+
+# Saves & Cache
+saves/
+*.log
