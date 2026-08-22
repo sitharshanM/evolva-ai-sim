@@ -464,6 +464,3 @@ Run fast, headless deterministic benchmarks across decades:
 
 ---
 
-## 📜 License
-
-Distributed under the **MIT License**. See [`LICENSE`](./LICENSE) for full details.
