@@ -73,8 +73,8 @@ void AeonDisasterEngine::tick_year(AeonEngine& engine) {
     }
 
     // 2. Random Disaster Trigger Check (12% chance per year)
-    if (rand() % 100 < 12) {
-        int r = rand() % 4;
+    if (engine.rng.uniform_int(0, 100 - 1) < 12) {
+        int r = engine.rng.uniform_int(0, 4 - 1);
         DisasterType dt = static_cast<DisasterType>(r);
         trigger_disaster(engine, dt);
     }
@@ -87,8 +87,8 @@ void AeonDisasterEngine::trigger_disaster(AeonEngine& engine, DisasterType type,
     d.start_year = engine.year;
 
     if (target_x < 0 || target_y < 0) {
-        d.target_x = 10 + rand() % 40;
-        d.target_y = 10 + rand() % 30;
+        d.target_x = 10 + engine.rng.uniform_int(0, 40 - 1);
+        d.target_y = 10 + engine.rng.uniform_int(0, 30 - 1);
     } else {
         d.target_x = target_x;
         d.target_y = target_y;

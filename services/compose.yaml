@@ -1,0 +1,69 @@
+name: aeon
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: aeon
+      POSTGRES_USER: aeon
+      POSTGRES_PASSWORD: ${AEON_DB_PASSWORD:?Run setup.ps1 first}
+    volumes: ["postgres:/var/lib/postgresql/data"]
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U aeon -d aeon"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  nats:
+    image: nats:2.10-alpine
+    command: ["-js", "-sd", "/data"]
+    volumes: ["nats:/data"]
+  neo4j:
+    image: neo4j:5-community
+    environment:
+      NEO4J_AUTH: neo4j/${AEON_GRAPH_PASSWORD:?Run setup.ps1 first}
+    volumes: ["neo4j:/data"]
+  qdrant:
+    image: qdrant/qdrant:v1.12.6
+    volumes: ["qdrant:/qdrant/storage"]
+  api:
+    build: .
+    command: ["python", "app.py"]
+    ports: ["127.0.0.1:8787:8787"]
+    environment: &env
+      DATABASE_URL: postgresql://aeon:${AEON_DB_PASSWORD}@postgres/aeon
+      NATS_URL: nats://nats:4222
+      NEO4J_URL: bolt://neo4j:7687
+      NEO4J_PASSWORD: ${AEON_GRAPH_PASSWORD}
+      QDRANT_URL: http://qdrant:6333
+      AEON_API_TOKEN: ${AEON_API_TOKEN:?Run setup.ps1 first}
+    depends_on:
+      postgres: {condition: service_healthy}
+    restart: unless-stopped
+  relay:
+    build: .
+    command: ["python", "worker.py", "relay"]
+    environment: *env
+    depends_on: [api, nats]
+    restart: unless-stopped
+  analytics:
+    build: .
+    command: ["python", "worker.py", "analytics"]
+    environment: *env
+    depends_on: [api, nats]
+    restart: unless-stopped
+  history:
+    build: .
+    command: ["python", "worker.py", "history"]
+    environment: *env
+    depends_on: [api, nats]
+    restart: unless-stopped
+  knowledge:
+    build: .
+    command: ["python", "worker.py", "knowledge"]
+    environment: *env
+    depends_on: [api, nats, neo4j, qdrant]
+    restart: unless-stopped
+volumes:
+  postgres:
+  nats:
+  neo4j:
+  qdrant:

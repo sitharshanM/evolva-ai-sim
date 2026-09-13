@@ -1,5 +1,6 @@
 # Build artifacts
 build/
+build-ninja/
 bin/
 *.exe
 *.o
@@ -27,3 +28,5 @@ imgui.ini
 # Saves & Cache
 saves/
 *.log
+__pycache__/
+*.pyc

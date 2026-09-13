@@ -41,7 +41,7 @@ bool AeonParliamentEngine::submit_bill_to_vote(AeonEngine& engine, const std::st
     bill.cost_gold = cost;
 
     // Calculate parliamentary votes based on party seat stances
-    int aye = seats_liberal + (rand() % 10);
+    int aye = seats_liberal + (engine.rng.uniform_int(0, 10 - 1));
     if (cost > 30000.0f) {
         aye += seats_technocrat;
     } else {

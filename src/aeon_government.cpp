@@ -1109,7 +1109,8 @@ void GovernmentTransitionEngine::tick_power_consolidation(
             std::cout << "\n[YEAR " << current_year << "] 🔥 POPULAR REVOLUTION in " << civ.name << "!" << std::endl;
             std::cout << "  The authoritarian regime collapses under public uprising and military mutiny!\n" << std::endl;
 
-            apply_transition("RESTORE_REPUBLIC", civ, engine.civs, engine.characters, engine, current_year);
+            AIDecision restoration; restoration.action_type = "RESTORE_REPUBLIC"; engine.apply_decision(civ.id, restoration);
+            civ.government = GovForm::REPUBLIC;
         }
     }
 }
@@ -1156,7 +1157,7 @@ void GovernmentTransitionEngine::handle_authoritarian_succession(
     // Scenario B: Democratic Restoration / Opposition Revolt (25% if opposition strong or institutions exist)
     else if (roll < 75 || opposition > 60.0f || inst_strength > 40.0f) {
         std::cout << "  [SUCCESSION RESULT] Power vacuum triggers democratic restoration!\n" << std::endl;
-        apply_transition("RESTORE_REPUBLIC", civ, engine.civs, characters, engine, current_year);
+        AIDecision restoration; restoration.action_type = "RESTORE_REPUBLIC"; engine.apply_decision(civ.id, restoration);
     }
     // Scenario C: Elite Oligarchic Takeover
     else {

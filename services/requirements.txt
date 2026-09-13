@@ -1,0 +1,4 @@
+psycopg[binary]==3.2.3
+nats-py==2.9.0
+neo4j==5.26.0
+qdrant-client==1.12.1

@@ -46,6 +46,7 @@
 
 
 #include "aeon_random.h"
+#include "aeon_runtime.h"
 #include "aeon_unique_id.h"
 #include <vector>
 #include <string>
@@ -70,6 +71,7 @@ struct ActiveEvent {
 class AeonEngine {
 public:
     AeonEngine() = default;
+    SimulationRuntime runtime;
 
     void init(uint64_t seed);
     void tick_second(float real_dt); // real_dt seconds -> years at current speed

@@ -27,14 +27,14 @@ void AeonEconomyMarketEngine::tick_year(AeonEngine& engine) {
     float index_change = 0.0f;
     for (auto& s : stocks) {
         s.prev_price = s.share_price;
-        float change_pct = ((rand() % 200 - 95) / 1000.0f); // -9.5% to +10.5%
+        float change_pct = ((engine.rng.uniform_int(0, 200 - 1) - 95) / 1000.0f); // -9.5% to +10.5%
         s.share_price = std::max(5.0f, s.share_price * (1.0f + change_pct));
         index_change += (s.share_price - s.prev_price);
     }
     market_index_points = std::max(1000.0f, market_index_points + index_change * 10.0f);
 
     // 2. Inflation & Interest Rate Effects
-    inflation_rate = std::max(0.5f, std::min(18.0f, 2.0f + (5.0f - central_bank_interest_rate) * 0.8f + (rand() % 20 - 10) * 0.1f));
+    inflation_rate = std::max(0.5f, std::min(18.0f, 2.0f + (5.0f - central_bank_interest_rate) * 0.8f + (engine.rng.uniform_int(0, 20 - 1) - 10) * 0.1f));
 
     auto& p = engine.president_game;
     if (p.active && p.player_civ_id >= 0 && p.player_civ_id < (int)engine.civs.size()) {

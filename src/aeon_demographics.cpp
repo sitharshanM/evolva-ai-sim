@@ -104,7 +104,7 @@ void AeonDemographicsEngine::update_demographics_year(AeonEngine& engine) {
             RefugeeWave rw;
             rw.origin_civ_id = civ.id;
             rw.target_civ_id = target_id;
-            rw.displacement_count = 45000 + (rand() % 30000);
+            rw.displacement_count = 45000 + (engine.rng.uniform_int(0, 30000 - 1));
             rw.reason = "Conflict Displacement";
             refugees.push_back(rw);
 

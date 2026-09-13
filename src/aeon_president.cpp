@@ -98,7 +98,7 @@ void AeonPresidentGame::tick_year(AeonEngine& engine) {
     civ.stability = std::max(0.0f, std::min(100.0f, civ.stability * 0.95f + approval_rating * 0.05f));
 
     // Coup Check
-    if (coup_risk > 85.0f && (rand() % 100 < 30)) {
+    if (coup_risk > 85.0f && (engine.rng.uniform_int(0, 100 - 1) < 30)) {
         is_overthrown = true;
         last_news_headline = "BREAKING: Military Junta overthrows the Administration in violent coup!";
         return;
@@ -121,7 +121,7 @@ void AeonPresidentGame::trigger_ollama_crisis(AeonEngine& engine) {
     current_crisis.options.clear();
 
     // Fast procedural crisis generator (0ms UI latency)
-    int r = rand() % 4;
+    int r = engine.rng.uniform_int(0, 4 - 1);
         if (r == 0) {
             current_crisis.title = "🌾 National Grain Supply Deficit";
             current_crisis.description = "Drought across key agrarian provinces threatens food supplies and consumer inflation.";
@@ -174,6 +174,11 @@ void AeonPresidentGame::trigger_ollama_crisis(AeonEngine& engine) {
 }
 
 void AeonPresidentGame::resolve_crisis_option(AeonEngine& engine, int option_idx) {
+    if (engine.runtime.phase != SimulationPhase::COMMANDS) {
+        SimulationCommand command; command.actor=player_civ_id; command.source=CommandSource::PLAYER;
+        command.kind=CommandKind::CRISIS_RESPONSE; command.option=option_idx;
+        engine.runtime.submit(engine,command); return;
+    }
     if (!current_crisis.active || option_idx < 0 || option_idx >= (int)current_crisis.options.size()) return;
 
     auto& civ = engine.civs[player_civ_id];
@@ -206,6 +211,11 @@ void AeonPresidentGame::resolve_crisis_option(AeonEngine& engine, int option_idx
 }
 
 void AeonPresidentGame::enact_decree(AeonEngine& engine, DecreeType decree, const std::string& custom_prompt) {
+    if (engine.runtime.phase != SimulationPhase::COMMANDS) {
+        SimulationCommand command; command.actor=player_civ_id; command.source=CommandSource::PLAYER;
+        command.kind=CommandKind::PRESIDENTIAL_DECREE; command.option=int(decree); command.text=custom_prompt;
+        engine.runtime.submit(engine,command); return;
+    }
     if (!active || player_civ_id < 0 || player_civ_id >= (int)engine.civs.size()) return;
 
     auto& civ = engine.civs[player_civ_id];
@@ -310,44 +320,18 @@ void AeonPresidentGame::enact_decree(AeonEngine& engine, DecreeType decree, cons
 }
 
 void AeonPresidentGame::declare_war(AeonEngine& engine, int target_civ_id) {
-    if (!active || player_civ_id < 0 || player_civ_id >= (int)engine.civs.size()) return;
-    if (target_civ_id < 0 || target_civ_id >= (int)engine.civs.size()) return;
-    if (target_civ_id == player_civ_id) return;
-
-    auto& player_civ = engine.civs[player_civ_id];
-    auto& target_civ = engine.civs[target_civ_id];
-
-    if (target_civ.is_alive <= 0.0f) return;
-
-    player_civ.at_war = true;
-    player_civ.war_with_civ = target_civ_id;
-    player_civ.war_year_start = engine.year;
-
-    target_civ.at_war = true;
-    target_civ.war_with_civ = player_civ_id;
-
-    player_civ.relations[target_civ_id] = DiplomacyStatus::AT_WAR;
-    target_civ.relations[player_civ_id] = DiplomacyStatus::AT_WAR;
-
-    last_news_headline = "⚔️ WAR DECLARED! President Alex Sterling orders full military invasion of " + target_civ.name + "!";
-
-    PresidentialRecord rec;
-    rec.year = engine.year;
-    rec.title = "Declaration of War against " + target_civ.name;
-    rec.summary = "Authorized full military invasion of " + target_civ.name + ". Army mobilized.";
-    rec.approval_delta = 5.0f;
-    decree_history.push_back(rec);
-
-    engine.history.record(engine.year, engine.month, "WAR",
-        player_civ.name + " declares war on " + target_civ.name,
-        "Presidential Military Mandate", player_civ_id, target_civ_id);
+    if (!active) return;
+    AIDecision decision;
+    decision.action_type = "DECLARE_WAR";
+    decision.target_civ = target_civ_id;
+    decision.declaration = "Presidential military mandate";
+    engine.apply_decision(player_civ_id, decision);
 }
-
 void AeonPresidentGame::trigger_election(AeonEngine& engine) {
     (void)engine;
     // Election check based on Approval Rating
     float win_chance = approval_rating;
-    int r = rand() % 100;
+    int r = engine.rng.uniform_int(0, 100 - 1);
 
     if (r < (int)win_chance) {
         elections_won++;

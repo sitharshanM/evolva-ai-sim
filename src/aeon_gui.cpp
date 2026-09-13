@@ -25,6 +25,7 @@
 #include <sstream>
 #include <algorithm>
 #include <fstream>
+#include <filesystem>
 
 
 namespace Aeon {
@@ -970,6 +971,20 @@ void AeonGUI::draw_empires_tab(AeonEngine& engine) {
         auto& ai = engine.ai_controllers[selected_civ_id_];
 
         ImGui::Text("Civilization: %s (#%d)", c.name.c_str(), c.id);
+        if (ImGui::CollapsingHeader("Nation cognition and intelligence")) {
+            ImGui::TextWrapped("%s", engine.runtime.explain(c.id).c_str());
+            const auto found = engine.runtime.cognition.find(c.id);
+            if (found != engine.runtime.cognition.end()) {
+                for (const auto& p : found->second.observation.nations) {
+                    if (p.army.knowledge == Knowledge::UNKNOWN)
+                        ImGui::Text("%s: military strength unknown", p.name.c_str());
+                    else ImGui::Text("%s: estimated army %.0f (confidence %.0f%%)",
+                        p.name.c_str(), p.army.value, p.army.confidence * 100);
+                }
+                for (const auto& objective : found->second.objectives)
+                    ImGui::TextWrapped("%d-year objective: %s", objective.horizon, objective.objective.c_str());
+            }
+        }
         ImGui::Separator();
         ImGui::Text("Government : %s", gov_form_name(c.government));
         ImGui::Text("Tech Era   : %s (%.0f%% progress)", tech_era_name(c.tech.era), c.tech.progress);
@@ -1152,6 +1167,47 @@ void AeonGUI::draw_chronicle_tab(AeonEngine& engine) {
 
 // ─── Save / Load Tab ──────────────────────────────────────────────────────────
 void AeonGUI::draw_persistence_tab(AeonEngine& engine) {
+    static SimulationTimeline timeline;
+    static std::string status;
+    if (ImGui::Button("Create checkpoint")) {
+        timeline.checkpoint(engine); status = "Checkpoint created.";
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Restore latest checkpoint") && timeline.size()) {
+        timeline.restore(engine, timeline.size()-1); status = "Checkpoint restored.";
+    }
+    if (ImGui::Button("Compare a research investment branch")) {
+        SimulationTimeline comparison;
+        comparison.checkpoint(engine);
+        auto baseline=comparison.branch(0);
+        auto alternate=comparison.branch(0);
+        AIDecision investment;investment.action_type="RESEARCH";
+        alternate->apply_decision(0,investment);
+        baseline->year++;alternate->year++;
+        baseline->tick_one_year();alternate->tick_one_year();
+        if (!baseline->civs.empty() && !alternate->civs.empty())
+            status="One-year research difference for nation 0: "+
+                std::to_string(alternate->civs[0].tech.research_pts-baseline->civs[0].tech.research_pts);
+    }
+    if (ImGui::Button("Export replay archive")) {
+        std::filesystem::create_directories("saves");
+        status = engine.runtime.write_archive(engine,"saves/runtime-replay.json",status) ? "Replay archive saved." : status;
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Replay archive")) {
+        status = SimulationRuntime::replay_archive(engine,"saves/runtime-replay.json",status) ? "Replay verified and restored." : status;
+    }
+    ImGui::TextWrapped("%s",status.c_str());
+    ImGui::Checkbox("Parallel cabinet workers", &engine.runtime.parallel_advisors);
+    if (ImGui::CollapsingHeader("Causal event history")) {
+        const auto& events=engine.runtime.events();
+        const size_t first=events.size()>100?events.size()-100:0;
+        for(size_t i=first;i<events.size();++i) {
+            const auto& event=events[i];
+            ImGui::TextWrapped("#%llu from #%llu | %d | %s: %s",(unsigned long long)event.id,
+                (unsigned long long)event.cause,event.year,event.type.c_str(),event.description.c_str());
+        }
+    }
     ImGui::Text("Multi-Universe Save & Load State");
     ImGui::Separator();
 

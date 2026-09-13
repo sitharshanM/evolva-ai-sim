@@ -8,6 +8,18 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_RELEASE ${CMAKE_BINARY_DIR}/bin)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_DEBUG ${CMAKE_BINARY_DIR}/bin)
 file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
+include(CTest)
+if(BUILD_TESTING)
+    add_executable(aeon_action_validator_test
+        tests/action_validator_test.cpp src/aeon_action_validator.cpp)
+    target_include_directories(aeon_action_validator_test PRIVATE src)
+    add_test(NAME action_validation COMMAND aeon_action_validator_test)
+endif()
+option(AEON_VALIDATION_ONLY "Build action validation tests without graphics dependencies" OFF)
+if(AEON_VALIDATION_ONLY)
+    return()
+endif()
+
 include(FetchContent)
 set(FETCHCONTENT_QUIET OFF)
 
@@ -87,6 +99,9 @@ set(SOURCES
     src/aeon_government.cpp
     src/aeon_test_government.cpp
     src/aeon_ruler_ai.cpp
+    src/aeon_action_validator.cpp
+    src/aeon_cognition.cpp
+    src/aeon_runtime.cpp
     src/aeon_ollama.cpp
     src/aeon_economy.cpp
     src/aeon_religion.cpp
@@ -140,6 +155,10 @@ set(SOURCES
 
 
 add_executable(DigitalLife ${SOURCES})
+if(BUILD_TESTING)
+    add_test(NAME action_execution COMMAND DigitalLife --test-actions)
+    add_test(NAME simulation_runtime COMMAND DigitalLife --test-runtime)
+endif()
 
 target_include_directories(DigitalLife PRIVATE
     ${CMAKE_SOURCE_DIR}/src

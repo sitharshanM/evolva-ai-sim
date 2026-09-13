@@ -17,6 +17,7 @@
 #include <limits>
 #include <algorithm>
 #include <cmath>
+#include <stdexcept>
 
 namespace Aeon {
 
@@ -78,19 +79,29 @@ public:
     }
 
     // ── State serialization for deterministic save/load ───────────────────────
-    /// Serialize seed + advance_count → compact string
+    /// Serialize the exact generator state, independent of distribution draw counts.
     std::string serialize() const {
         std::ostringstream oss;
-        oss << seed_ << ' ' << advance_count_;
+        oss << "rng2 " << seed_ << ' ' << advance_count_ << ' ' << rng_;
         return oss.str();
     }
 
     /// Restore from serialize() string — re-seeds and fast-forwards
     void deserialize(const std::string& s) {
         std::istringstream iss(s);
+        if (s.rfind("rng2 ", 0) == 0) {
+            std::string version;
+            uint64_t seed, count;
+            std::mt19937_64 restored;
+            if (!(iss >> version >> seed >> count >> restored))
+                throw std::invalid_argument("Invalid RNG state");
+            seed_ = seed; advance_count_ = count; rng_ = restored;
+            return;
+        }
         uint64_t stored_seed = 928374ULL;
         uint64_t stored_adv  = 0ULL;
-        iss >> stored_seed >> stored_adv;
+        if (!(iss >> stored_seed >> stored_adv) || stored_adv > 100000000ULL)
+            throw std::invalid_argument("Invalid legacy RNG state");
         reseed(stored_seed);
         // Fast-forward to the same position
         rng_.discard(stored_adv);

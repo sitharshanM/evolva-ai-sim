@@ -166,7 +166,7 @@ void AeonReligionEngine::check_religious_schism(AeonEngine& engine) {
             r.schism_risk += 2.0f;
         }
 
-        if (r.schism_risk >= 30.0f && (rand() % 100) < 25) {
+        if (r.schism_risk >= 30.0f && (engine.rng.uniform_int(0, 100 - 1)) < 25) {
             r.schism_risk = 5.0f;
             WorldReligion schism_faith;
             schism_faith.id = (int)religions.size() + 1;

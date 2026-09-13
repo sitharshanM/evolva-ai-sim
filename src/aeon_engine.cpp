@@ -88,6 +88,7 @@ AeonCharacter AeonEngine::make_ruler(int id, const std::string& name,
 //  init
 // ─────────────────────────────────────────────────────────────────────────────
 void AeonEngine::init(uint64_t s) {
+    *this = AeonEngine{};
     seed = s;
     rng_.seed(seed);
     rng.reseed(seed);
@@ -199,13 +200,12 @@ void AeonEngine::init(uint64_t s) {
     speed  = SPEED_NORMAL;
     paused = false;
 
-    bool ollama_ok = AeonOllama::is_available();
     std::cout << "\n=======================================================\n";
     std::cout << "  AEON  --  Authoritative Simulation Engine\n";
     std::cout << "=======================================================\n";
     std::cout << "  Empires: NORDRA  ELDORIA  VALORIA  DRAKOR  SOLARIA\n";
     std::cout << "  World Seed: " << seed << "\n";
-    std::cout << "  AI Engine : " << (ollama_ok ? "HYBRID (LLM + Dynamic Utility Engine)" : "AUTHORITATIVE DYNAMIC UTILITY ENGINE") << "\n\n";
+    std::cout << "  AI Engine : DETERMINISTIC NATION CABINETS\n\n";
 
     market_engine.init();
     religion_engine.init();
@@ -252,21 +252,24 @@ void AeonEngine::tick_second(float real_dt) {
 
     float years_delta = (real_dt / SECONDS_PER_YEAR) * speed;
     time_accum += years_delta;
-    if (time_accum >= 1.0f) {
+    while (time_accum >= 1.0f) {
         time_accum -= 1.0f;
-        tick_one_year();
         year++;
+        month = 1;
+        tick_one_year();
     }
     month = (static_cast<int>(time_accum * MONTHS_PER_YEAR) % 12) + 1;
 
-    gis_climate_engine.update_climate_physics(time_accum * 6.28f);
-    supply_demand_engine.update_prices_tick(*this);
+    // Presentation frames must not consume simulation randomness or mutate markets.
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  tick_one_year
 // ─────────────────────────────────────────────────────────────────────────────
 void AeonEngine::tick_one_year() {
+    runtime.begin_tick(*this);
+    gis_climate_engine.update_climate_physics(float(year % 12) * 0.5235988f);
+    supply_demand_engine.update_prices_tick(*this);
     demographics_engine.update_demographics_year(*this);
     military_engine.update_military_tick(*this);
     central_bank_engine.update_central_banks_tick(*this);
@@ -316,6 +319,7 @@ void AeonEngine::tick_one_year() {
 
     history.decay_relations(1.0f);
 
+    runtime.phase = SimulationPhase::SOCIETY;
     // 1. Tick civilization states & Government Modifiers
     for (auto& civ : civs) {
         if (civ.is_alive > 0.0f) {
@@ -433,8 +437,9 @@ void AeonEngine::tick_one_year() {
         characters.push_back(nr);
     }
 
-    // 3. AI Decisions
-    for (int i = 0; i < (int)civs.size(); ++i) {
+    // 3. AI decisions use isolated nation observations by default.
+    if (runtime.enabled) runtime.think(*this);
+    else for (int i = 0; i < (int)civs.size(); ++i) {
         if (civs[i].is_alive <= 0.0f) continue;
         if (president_game.active && i == president_game.player_civ_id) continue;
         if (i >= (int)ai_controllers.size()) {
@@ -442,7 +447,6 @@ void AeonEngine::tick_one_year() {
         }
 
         auto dec = ai_controllers[i].decide(civs[i], civs, history, characters, year);
-        civs[i].history_memory.add_action(dec.action_type, dec.target_civ, year, dec.utility_score);
         apply_decision(i, dec);
     }
 
@@ -526,20 +530,40 @@ void AeonEngine::tick_one_year() {
 
     // Print Annual World Newspaper
     std::cout << chronicler.generate_aeon_daily(*this, year) << std::endl;
+    runtime.end_tick(*this);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  apply_decision  —  Authoritative execution with strict validation
 // ─────────────────────────────────────────────────────────────────────────────
 void AeonEngine::apply_decision(int civ_idx, const AIDecision& dec) {
-    if (civ_idx < 0 || civ_idx >= (int)civs.size()) return;
-    auto& civ = civs[civ_idx];
-    if (civ.is_alive <= 0.0f) return;
-
-    if (dec.target_civ == civ.id) {
-        std::cout << "[SIMULATION REJECT] Blocked self-targeting decision from " << civ.name << std::endl;
+    if (runtime.phase != SimulationPhase::COMMANDS) {
+        SimulationCommand command;
+        command.actor = civ_idx; command.proposal = dec;
+        command.source = runtime.phase == SimulationPhase::IDLE ? CommandSource::PLAYER : CommandSource::SYSTEM;
+        runtime.submit(*this, command);
         return;
     }
+    if (civ_idx < 0 || civ_idx >= (int)civs.size()) {
+        runtime.record(*this, "REJECTED", civ_idx, dec.target_civ, "Actor does not exist");
+        return;
+    }
+    auto& civ = civs[civ_idx];
+
+    const std::unordered_map<int, int> empty_cooldowns;
+    const auto& war_cooldowns = civ_idx < (int)ai_controllers.size()
+        ? ai_controllers[civ_idx].war_cooldown_ : empty_cooldowns;
+    const auto& trade_cooldowns = civ_idx < (int)ai_controllers.size()
+        ? ai_controllers[civ_idx].trade_cooldown_ : empty_cooldowns;
+    std::string rejection;
+    // Never trust a proposal's is_validated flag: the world may have changed.
+    if (!ActionValidator::validate(dec, civ, civs, year, war_cooldowns, trade_cooldowns, rejection)) {
+        runtime.record(*this, "REJECTED", civ_idx, dec.target_civ, rejection);
+        history.record(year, month, "ACTION_REJECTED", civ.name + ": " + dec.action_type,
+            rejection, civ.id, dec.target_civ, {"execution_validation"}, 0.1f);
+        return;
+    }
+    const auto before = world_metrics(*this);
 
     if (dec.action_type == "DECLARE_WAR" && dec.target_civ >= 0 && dec.target_civ < (int)civs.size()) {
         auto& target = civs[dec.target_civ];
@@ -628,6 +652,22 @@ void AeonEngine::apply_decision(int civ_idx, const AIDecision& dec) {
                 dec.declaration, civ_idx, dec.target_civ,
                 {"commercial_interests", "mutual_benefit"}, 0.50f);
         }
+    } else if (dec.action_type == "NEGOTIATE_PEACE") {
+        auto& target = civs[dec.target_civ];
+        civ.at_war = target.at_war = false;
+        civ.war_with_civ = target.war_with_civ = -1;
+        civ.relations[dec.target_civ] = DiplomacyStatus::NEUTRAL;
+        target.relations[civ_idx] = DiplomacyStatus::NEUTRAL;
+        history.relation(civ_idx, dec.target_civ).record_treaty();
+        history.relation(civ_idx, dec.target_civ).last_interaction_year = year;
+        active_events.erase(std::remove_if(active_events.begin(), active_events.end(),
+            [&](const ActiveEvent& event) {
+                return event.type == "WAR" &&
+                    ((event.civ_id == civ_idx && event.civ2_id == dec.target_civ) ||
+                     (event.civ_id == dec.target_civ && event.civ2_id == civ_idx));
+            }), active_events.end());
+        history.record(year, month, "DIPLOMACY", civ.name + " and " + target.name + " agree to peace",
+            dec.declaration, civ_idx, dec.target_civ, {"negotiated_peace"}, 0.7f);
     } else if (dec.action_type == "BUILD_MILITARY") {
         float cost = 40.0f;
         civ.economy.annual_income = std::max(0.0f, civ.economy.annual_income - cost);
@@ -647,9 +687,19 @@ void AeonEngine::apply_decision(int civ_idx, const AIDecision& dec) {
         civ.stability = std::clamp(civ.stability + 18.0f, 0.0f, 100.0f);
         civ.unrest = std::clamp(civ.unrest - 20.0f, 0.0f, 100.0f);
         civ.morale = std::clamp(civ.morale + 10.0f, 0.0f, 100.0f);
-    } else {
+    } else if (dec.action_type != "HOLD") {
         // Check if it's a government transition or political crisis action
-        gov_transition_engine.apply_transition(dec.action_type, civ, civs, characters, *this, year);
+        if (!gov_transition_engine.apply_transition(dec.action_type, civ, civs, characters, *this, year))
+            return;
+    }
+    civ.history_memory.add_action(dec.action_type, dec.target_civ, year, dec.utility_score);
+    runtime.record(*this, "APPLIED", civ_idx, dec.target_civ, dec.action_type,
+        nlohmann::json::diff(before, world_metrics(*this)));
+    if (civ_idx < (int)ai_controllers.size()) {
+        auto& ai = ai_controllers[civ_idx];
+        ai.action_last_used_year_[dec.action_type] = year;
+        if (dec.action_type == "PROPOSE_TRADE") ai.trade_cooldown_[dec.target_civ] = year;
+        if (dec.action_type == "DECLARE_WAR") ai.war_cooldown_[dec.target_civ] = year;
     }
 }
 

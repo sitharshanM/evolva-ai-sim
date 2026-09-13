@@ -23,7 +23,7 @@ void AeonSupplyDemandEngine::update_prices_tick(AeonEngine& engine) {
     (void)engine;
     for (auto& item : commodities) {
         // Organic random market noise
-        float noise = ((float)(rand() % 100) / 100.0f - 0.5f) * 50.0f;
+        float noise = ((float)(engine.rng.uniform_int(0, 100 - 1)) / 100.0f - 0.5f) * 50.0f;
         item.global_demand = std::max(100.0f, item.global_demand + noise);
 
         // Real Economic Elasticity Formula: Price = Base * (1 + (Demand - Supply) / Supply)

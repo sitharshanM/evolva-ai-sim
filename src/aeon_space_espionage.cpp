@@ -81,7 +81,7 @@ bool AeonSpaceEspionage::attempt_phase_launch(AeonEngine& engine, int project_id
     auto& p = engine.president_game;
 
     // Failure Roll
-    float roll = static_cast<float>(rand() % 100) / 100.0f;
+    float roll = static_cast<float>(engine.rng.uniform_int(0, 100 - 1)) / 100.0f;
     if (roll < mp.failure_risk) {
         // CATASTROPHIC TEST EXPLOSION!
         mp.phase_progress[phase] *= 0.50f; // Lost half progress

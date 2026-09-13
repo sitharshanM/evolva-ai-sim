@@ -21,7 +21,7 @@ std::string IndividualCitizen::get_role_string() const {
 AeonCitizenEngine::AeonCitizenEngine() {
 }
 
-void AeonCitizenEngine::init_citizens(const AeonEngine& engine) {
+void AeonCitizenEngine::init_citizens(AeonEngine& engine) {
     citizens.clear();
 
     const char* first_names[] = { "Marcus", "Elena", "Valerius", "Kaelen", "Aurelia", "Darius", "Lyra", "Cassian" };
@@ -40,8 +40,8 @@ void AeonCitizenEngine::init_citizens(const AeonEngine& engine) {
             c.age = 22 + (i * 6);
             c.health = 100.0f;
             c.wealth_gold = 1500.0 + (i * 800.0);
-            c.loyalty = 75.0f + (rand() % 20);
-            c.ambition = 40.0f + (rand() % 50);
+            c.loyalty = 75.0f + (engine.rng.uniform_int(0, 20 - 1));
+            c.ambition = 40.0f + (engine.rng.uniform_int(0, 50 - 1));
             c.influence = 30.0f + (i * 15);
             c.map_x = std::max(0, std::min(MAP_WIDTH - 1, civ.capital_x + ((i % 2 == 0) ? 2 : -2)));
             c.map_y = std::max(0, std::min(MAP_HEIGHT - 1, civ.capital_y + ((i > 1) ? 2 : -2)));
@@ -61,8 +61,8 @@ void AeonCitizenEngine::update_citizens_tick(AeonEngine& engine) {
         c.wealth_gold += (c.influence * 12.0);
 
         // Movement on 2D map
-        c.map_x = (c.map_x + (rand() % 3 - 1) + MAP_WIDTH) % MAP_WIDTH;
-        c.map_y = (c.map_y + (rand() % 3 - 1) + MAP_HEIGHT) % MAP_HEIGHT;
+        c.map_x = (c.map_x + (engine.rng.uniform_int(0, 3 - 1) - 1) + MAP_WIDTH) % MAP_WIDTH;
+        c.map_y = (c.map_y + (engine.rng.uniform_int(0, 3 - 1) - 1) + MAP_HEIGHT) % MAP_HEIGHT;
 
         // Coup Plotting check
         if (c.loyalty < 35.0f && c.ambition > 65.0f && !c.has_active_coup_plot) {
@@ -76,12 +76,12 @@ void AeonCitizenEngine::update_citizens_tick(AeonEngine& engine) {
         }
 
         // Master Artisan artifact creation
-        if (c.role == CitizenRole::MASTER_ARTISAN && (rand() % 100) < 10) {
+        if (c.role == CitizenRole::MASTER_ARTISAN && (engine.rng.uniform_int(0, 100 - 1)) < 10) {
             create_artisan_artifact(c.id, engine);
         }
 
         // Natural mortality check
-        if (c.age > 75 && (rand() % 100) < (c.age - 70)) {
+        if (c.age > 75 && (engine.rng.uniform_int(0, 100 - 1)) < (c.age - 70)) {
             c.is_alive = false;
             int dead_civ = c.civ_id;
             if (c.civ_id >= 0 && c.civ_id < (int)engine.civs.size()) {
@@ -188,13 +188,13 @@ void AeonCitizenEngine::spawn_replacement_citizen(int civ_id, AeonEngine& engine
     IndividualCitizen nc;
     nc.id = ++next_citizen_id;
     nc.civ_id = civ_id;
-    nc.name = std::string(firsts[rand() % 7]) + " " + lasts[rand() % 5];
-    nc.role = static_cast<CitizenRole>(rand() % 7);
-    nc.age = 20 + rand() % 10;
+    nc.name = std::string(firsts[engine.rng.uniform_int(0, 7 - 1)]) + " " + lasts[engine.rng.uniform_int(0, 5 - 1)];
+    nc.role = static_cast<CitizenRole>(engine.rng.uniform_int(0, 7 - 1));
+    nc.age = 20 + engine.rng.uniform_int(0, 10 - 1);
     nc.health = 100.0f;
     nc.wealth_gold = 1000.0;
     nc.loyalty = 80.0f;
-    nc.ambition = 40.0f + (rand() % 40);
+    nc.ambition = 40.0f + (engine.rng.uniform_int(0, 40 - 1));
     nc.influence = 25.0f;
     nc.map_x = civ.capital_x;
     nc.map_y = civ.capital_y;

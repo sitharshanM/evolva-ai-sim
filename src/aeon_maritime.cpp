@@ -90,7 +90,7 @@ void AeonMaritimeEngine::update_maritime_tick(AeonEngine& engine) {
         cs.x = (cs.x + 2) % MAP_WIDTH;
 
         // Oceanic storm hazard (3% chance)
-        if ((rand() % 100) < 3 && !cs.sunk_by_storm) {
+        if ((engine.rng.uniform_int(0, 100 - 1)) < 3 && !cs.sunk_by_storm) {
             cs.sunk_by_storm = true;
             if (cs.owner_civ_id >= 0 && cs.owner_civ_id < (int)engine.civs.size()) {
                 engine.history.record(engine.year, engine.month, "DISASTER",
@@ -101,7 +101,7 @@ void AeonMaritimeEngine::update_maritime_tick(AeonEngine& engine) {
         }
         
         // Check for pirate or privateer raids
-        if ((rand() % 100) < 10 && !cs.intercepted_by_pirates && !cs.sunk_by_storm) {
+        if ((engine.rng.uniform_int(0, 100 - 1)) < 10 && !cs.intercepted_by_pirates && !cs.sunk_by_storm) {
             cs.intercepted_by_pirates = true;
             
             // Check if a privateer state receives a cut

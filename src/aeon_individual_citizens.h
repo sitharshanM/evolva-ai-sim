@@ -49,7 +49,7 @@ public:
     int next_citizen_id = 100;
 
     AeonCitizenEngine();
-    void init_citizens(const AeonEngine& engine);
+    void init_citizens(AeonEngine& engine);
     void update_citizens_tick(AeonEngine& engine);
 
     void promote_citizen(int citizen_id, CitizenRole new_role, AeonEngine& engine);

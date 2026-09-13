@@ -60,7 +60,7 @@ void AeonRebellionEngine::update_rebellions_tick(AeonEngine& engine) {
         if (civ.is_commons || civ.is_alive <= 0.0f) continue;
 
         // Check if low stability triggers secession
-        if (civ.stability < 30.0f && (rand() % 100) < 25) {
+        if (civ.stability < 30.0f && (engine.rng.uniform_int(0, 100 - 1)) < 25) {
             bool already_rebelling = false;
             for (const auto& r : rebellions) {
                 if (r.parent_civ_id == civ.id && r.active) {

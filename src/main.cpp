@@ -2,6 +2,8 @@
 #include "aeon_cli.h"
 #include "aeon_gui.h"
 #include "aeon_test_government.h"
+#include "../tests/action_execution_test.h"
+#include "../tests/runtime_test.h"
 #include <iostream>
 #include <string>
 #include <thread>
@@ -23,8 +25,19 @@ int main(int argc, char** argv) {
     uint64_t seed = 928374ULL;
     bool force_cli = false;
     int run_years = 0;
+    std::string export_replay, replay_path;
+    bool parallel_advisors = false;
 
     for (int i = 1; i < argc; ++i) {
+        if (std::strcmp(argv[i], "--export-replay") == 0 && i + 1 < argc) export_replay = argv[++i];
+        if (std::strcmp(argv[i], "--replay") == 0 && i + 1 < argc) replay_path = argv[++i];
+        if (std::strcmp(argv[i], "--parallel-advisors") == 0) parallel_advisors = true;
+        if (std::strcmp(argv[i], "--test-runtime") == 0) {
+            return run_runtime_tests() ? 0 : 1;
+        }
+        if (std::strcmp(argv[i], "--test-actions") == 0) {
+            return run_action_execution_tests() ? 0 : 1;
+        }
         if (std::strcmp(argv[i], "--test-government") == 0 || std::strcmp(argv[i], "--test") == 0) {
             bool ok = Aeon::GovernmentTestSuite::run_all_tests();
             return ok ? 0 : 1;
@@ -43,6 +56,14 @@ int main(int argc, char** argv) {
 
     Aeon::AeonEngine engine;
     engine.init(seed);
+    if (!replay_path.empty()) {
+        std::string error;
+        if (!Aeon::SimulationRuntime::replay_archive(engine, replay_path, error)) {
+            std::cerr << error << '\n'; return 1;
+        }
+        if (run_years == 0) { std::cout << "Replay verified at year " << engine.year << '\n'; return 0; }
+    }
+    engine.runtime.parallel_advisors = parallel_advisors;
 
     if (run_years > 0) {
         std::cout << "\n========================================================================\n";
@@ -56,6 +77,12 @@ int main(int argc, char** argv) {
         std::cout << "\n========================================================================\n";
         std::cout << "  🏁 BATCH SIMULATION COMPLETE (" << start_year << " -> " << engine.year << ")\n";
         std::cout << "========================================================================\n";
+        if (!export_replay.empty()) {
+            std::string error;
+            if (!engine.runtime.write_archive(engine, export_replay, error)) {
+                std::cerr << error << '\n'; return 1;
+            }
+        }
         return 0;
     }
 
