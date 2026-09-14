@@ -205,6 +205,7 @@ void AeonGUI::render_frame(AeonEngine& engine) {
         }
         else if (active_category_ == 1) { // DEF: Defense & Tech
             if (ImGui::BeginTabItem("AI Agent & Governor"))      { draw_agent_control_tab(engine); ImGui::EndTabItem(); }
+            if (ImGui::BeginTabItem("Provinces, Command & Treaties")) { draw_sovereignty_tab(engine); ImGui::EndTabItem(); }
             if (ImGui::BeginTabItem("Military & Logistics"))     { draw_military_logistics_tab(engine); ImGui::EndTabItem(); }
             if (ImGui::BeginTabItem("Civil Wars & Rebellions"))  { draw_rebellion_tab(engine); ImGui::EndTabItem(); }
             if (ImGui::BeginTabItem("Nuclear Triad & MAD"))      { draw_nuclear_tab(engine); ImGui::EndTabItem(); }
@@ -1161,7 +1162,20 @@ void AeonGUI::draw_chronicle_tab(AeonEngine& engine) {
     ImGui::Text("LLM Imperial Chronicle Book");
     ImGui::Separator();
     ImGui::BeginChild("ChronicleScroll");
+    const auto& era = engine.chronicler.get_current_era();
+    ImGui::TextWrapped("Current era: %s", era.title.empty() ? "Awaiting annual assessment" : era.title.c_str());
+    if (!era.title.empty()) ImGui::Text("Since %d | %s", era.start_year, era_type_name(era.type));
+    ImGui::TextWrapped("%s", era.historical_summary.c_str());
+    if (ImGui::CollapsingHeader("Recorded eras")) {
+        for (const auto& past : engine.chronicler.get_recorded_eras()) {
+            ImGui::TextWrapped("%d - %d: %s", past.start_year, past.end_year, past.title.c_str());
+            ImGui::TextWrapped("%s", past.historical_summary.c_str());
+        }
+    }
+    ImGui::Separator();
+    ImGui::PushTextWrapPos();
     ImGui::TextUnformatted(engine.chronicler.get_chronicle().c_str());
+    ImGui::PopTextWrapPos();
     ImGui::EndChild();
 }
 
@@ -2432,34 +2446,42 @@ void AeonGUI::draw_space_race_tab(AeonEngine& engine) {
 
 // ─── ⚔️ Breakaway Rebel Factions & Civil Wars Tab ──────────────────────────────
 void AeonGUI::draw_rebellion_tab(AeonEngine& engine) {
+    ImGui::BeginChild("RebellionScroll");
     auto& reb = engine.rebellion_engine;
     ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "⚔️ BREAKAWAY REBEL FACTIONS & CIVIL WARS");
     ImGui::Separator();
 
-    ImGui::Text("ACTIVE REBELLIONS: %zu", reb.rebellions.size());
+    const auto active_count = std::count_if(reb.rebellions.begin(), reb.rebellions.end(), [](const auto& r) { return r.active; });
+    ImGui::Text("ACTIVE REBELLIONS: %d | Recorded: %zu", (int)active_count, reb.rebellions.size());
     if (reb.rebellions.empty()) {
         ImGui::Text("  No active secessions or civil war insurgencies.");
     } else {
         for (const auto& r : reb.rebellions) {
             ImGui::Text("  🔥 %s (Civ %d Secession) | Ideology: %s | Strength: %.0f",
                 r.name.c_str(), r.parent_civ_id, r.ideology.c_str(), r.strength);
+            ImGui::Text("    %s | Leader: %s | Defected divisions: %d | Personnel: %.0f", r.active ? "Active" : "Resolved", r.leader_name.c_str(), r.defected_division_count, r.defected_army_size);
+            ImGui::Text("    Recognized by %zu nations | Funded by %zu | Aid %.1f", r.recognized_by_civ_ids.size(), r.funded_by_civ_ids.size(), r.foreign_financial_aid);
+            for (const auto& province : r.seceded_provinces) ImGui::BulletText("Seceded: %s", province.c_str());
         }
     }
     ImGui::Separator();
 
+    int secession_target = -1;
     ImGui::Text("CIVILIAN STABILITY MONITOR:");
     for (const auto& civ : engine.civs) {
         if (civ.is_commons) continue;
         ImGui::Text("  %s: Stability %.1f%% %s", civ.name.c_str(), civ.stability,
-            civ.stability < 35.0f ? "[⚠️ CRITICAL UNREST - REBELLION IMMINENT]" : "[STABLE]");
+            civ.stability < 35.0f ? "[LOW STABILITY]" : "[ABOVE LOW-STABILITY THRESHOLD]");
         if (civ.stability < 35.0f) {
             ImGui::SameLine();
             std::string btn_label = "Trigger Secession (" + civ.name + ")";
             if (ImGui::Button(btn_label.c_str())) {
-                reb.trigger_secession(civ.id, engine);
+                secession_target = civ.id;
             }
         }
     }
+    ImGui::EndChild();
+    if (secession_target >= 0) reb.trigger_secession(secession_target, engine);
 }
 
 // ─── ☢️ Nuclear Triad, MAD & Space Elevator Kinetic Bombardment Tab ──────────
@@ -2775,4 +2797,94 @@ void AeonGUI::draw_interactive_event_modal(AeonEngine& engine) {
     }
 }
 
+} // namespace Aeon
+
+namespace Aeon {
+void AeonGUI::draw_sovereignty_tab(AeonEngine& engine) {
+    ImGui::BeginChild("SovereigntyScroll");
+    auto nation_name = [&](int id) -> const char* {
+        for (const auto& c : engine.civs) if (c.id == id) return c.name.c_str();
+        return "Unknown nation";
+    };
+    if (engine.civs.empty()) {
+        ImGui::TextUnformatted("No nations available.");
+        ImGui::EndChild();
+        return;
+    }
+    selected_civ_id_ = std::clamp(selected_civ_id_, 0, (int)engine.civs.size() - 1);
+    if (ImGui::BeginCombo("Nation", engine.civs[selected_civ_id_].name.c_str())) {
+        for (int i = 0; i < (int)engine.civs.size(); ++i) {
+            ImGui::PushID(i);
+            if (ImGui::Selectable(engine.civs[i].name.c_str(), selected_civ_id_ == i)) selected_civ_id_ = i;
+            ImGui::PopID();
+        }
+        ImGui::EndCombo();
+    }
+    const auto& c = engine.civs[selected_civ_id_];
+    ImGui::TextWrapped("Ideology: %s | Stability: %.0f%% | War exhaustion: %.0f%%", ideology_type_name(c.national_ideology), c.stability, c.war_exhaustion);
+    if (ImGui::CollapsingHeader("Provinces and occupation", ImGuiTreeNodeFlags_DefaultOpen)) {
+        if (c.provinces.empty()) ImGui::TextUnformatted("No provinces recorded.");
+        if (ImGui::BeginTable("ProvinceState", 6, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollX | ImGuiTableFlags_Resizable)) {
+            for (const char* label : {"Province", "Population / GDP", "Industry / Resources", "Loyalty / Unrest", "Control / Resistance", "Ancestral owner"}) ImGui::TableSetupColumn(label);
+            ImGui::TableHeadersRow();
+            for (const auto& p : c.provinces) {
+                ImGui::TableNextRow();
+                ImGui::TableSetColumnIndex(0); ImGui::Text("%s (%d, %d)", p.name.c_str(), p.map_x, p.map_y);
+                ImGui::TableSetColumnIndex(1); ImGui::Text("%lld / %.1f", p.population, p.gdp);
+                ImGui::TableSetColumnIndex(2); ImGui::Text("%d factories", p.factories);
+                ImGui::Text("%s%s%s%s", p.has_port ? "Port " : "", p.has_strategic_iron ? "Iron " : "", p.has_oil_field ? "Oil " : "", p.has_uranium ? "Uranium" : "");
+                ImGui::TableSetColumnIndex(3); ImGui::Text("%.0f%% / %.0f%%", p.loyalty, p.unrest);
+                ImGui::TableSetColumnIndex(4); ImGui::TextWrapped("%s", p.is_occupied ? nation_name(p.occupier_civ_id) : "Home control");
+                ImGui::Text("Resistance %.0f%%%s", p.occupation_resistance, p.in_rebellion ? " / Rebellion" : "");
+                ImGui::TableSetColumnIndex(5); ImGui::TextWrapped("%s", nation_name(p.original_civ_id));
+            }
+            ImGui::EndTable();
+        }
+    }
+    if (ImGui::CollapsingHeader("Generals and command", ImGuiTreeNodeFlags_DefaultOpen)) {
+        int count = 0;
+        for (const auto& g : engine.characters) {
+            if (!g.is_alive || !g.is_general || g.civ_id != c.id) continue;
+            ++count;
+            ImGui::PushID(g.id);
+            if (ImGui::TreeNode(g.name.c_str())) {
+                ImGui::TextWrapped("Skill %.0f%% | Loyalty %.0f%% | Ambition %.0f%% | Army reputation %.0f%%", g.command_skill * 100, g.loyalty_to_ruler * 100, g.political_ambition * 100, g.reputation_with_army);
+                ImGui::Text("Ideology: %s", ideology_type_name(g.general_ideology));
+                bool assigned = false;
+                for (const auto& d : engine.military_engine.divisions) {
+                    if (d.general_character_id != g.id || d.civ_id != c.id) continue;
+                    assigned = true;
+                    ImGui::TextWrapped("Command: %s | Personnel %.0f | Supply %.0f%%", d.name.c_str(), d.personnel, d.supply_level * 100);
+                }
+                if (!assigned) ImGui::TextUnformatted("No assigned division.");
+                ImGui::TextWrapped("Order assessment: %s", g.will_refuse_order(c.stability, c.public_support) ? "Would refuse under current conditions" : "Would follow under current conditions");
+                for (const auto& trait : g.military_traits) ImGui::BulletText("%s", trait.c_str());
+                ImGui::TreePop();
+            }
+            ImGui::PopID();
+        }
+        if (!count) ImGui::TextUnformatted("No living generals.");
+    }
+    if (ImGui::CollapsingHeader("Peace treaties and war memory", ImGuiTreeNodeFlags_DefaultOpen)) {
+        if (c.signed_treaties.empty()) ImGui::TextUnformatted("No signed treaties.");
+        for (const auto& t : c.signed_treaties) {
+            ImGui::Separator();
+            ImGui::TextWrapped("%s | Signed %d", t.treaty_name.c_str(), t.year_signed);
+            ImGui::TextWrapped("%s / %s", nation_name(t.victor_civ_id), nation_name(t.defeated_civ_id));
+            ImGui::TextWrapped("%s | Reparations %.1f | %d negotiation rounds", t.is_white_peace ? "White peace" : "Settlement", t.reparations_total, t.negotiation_rounds);
+            const int expiry = t.year_signed + t.truce_duration_years;
+            ImGui::Text("Peace guarantee through %d (%s)", expiry, engine.year <= expiry ? "Active" : "Expired");
+            for (const auto& name : t.ceded_province_names) ImGui::BulletText("Ceded: %s", name.c_str());
+        }
+        for (const auto& other : engine.civs) {
+            const auto it = c.bilateral_relations.find(other.id);
+            if (it == c.bilateral_relations.end()) continue;
+            const auto& r = it->second;
+            if (!r.wars_fought && !r.border_claim_score && !c.is_under_truce_with(other.id, engine.year)) continue;
+            ImGui::Separator();
+            ImGui::TextWrapped("%s: %d wars | Taken %d / Lost %d | Claims %.0f | War memory %.0f%s", other.name.c_str(), r.wars_fought, r.provinces_taken, r.provinces_lost, r.border_claim_score, r.war_memory_weight, c.is_under_truce_with(other.id, engine.year) ? " | Truce active" : "");
+        }
+    }
+    ImGui::EndChild();
+}
 } // namespace Aeon

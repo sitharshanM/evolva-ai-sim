@@ -172,6 +172,34 @@ inline const char* gov_form_name(GovForm g) {
     return "Unknown";
 }
 
+// ─── National Ideology ────────────────────────────────────────────────────────
+enum class IdeologyType {
+    MONARCHISM,
+    REPUBLICANISM,
+    TECHNOCRACY,
+    MILITARISM,
+    SOCIAL_DEMOCRACY,
+    NATIONALISM,
+    FEDERALISM,
+    CORPORATE_RULE,
+    THEOCRACY
+};
+
+inline const char* ideology_type_name(IdeologyType i) {
+    switch (i) {
+        case IdeologyType::MONARCHISM:        return "Monarchism";
+        case IdeologyType::REPUBLICANISM:     return "Republicanism";
+        case IdeologyType::TECHNOCRACY:       return "Technocracy";
+        case IdeologyType::MILITARISM:        return "Militarism";
+        case IdeologyType::SOCIAL_DEMOCRACY:  return "Social Democracy";
+        case IdeologyType::NATIONALISM:       return "Nationalism";
+        case IdeologyType::FEDERALISM:        return "Federalism";
+        case IdeologyType::CORPORATE_RULE:    return "Corporate Rule";
+        case IdeologyType::THEOCRACY:         return "Theocracy";
+    }
+    return "Monarchism";
+}
+
 // ─── Diplomatic Status ────────────────────────────────────────────────────────
 enum class DiplomacyStatus {
     NEUTRAL, TRADE_PARTNER, ALLY, DEFENSIVE_PACT,
@@ -265,8 +293,10 @@ struct Province {
     int         id                = 0;
     std::string name;
     int         civ_id            = -1;
+    int         original_civ_id   = -1;      // Ancestral claim / original founder
     long long   population        = 100000LL;
     float       gdp               = 200.0f;
+    int         factories         = 4;       // Manufacturing capacity
     float       stability         = 75.0f;   // 0-100
     float       unrest            = 15.0f;   // 0-100
     float       loyalty           = 80.0f;   // 0-100 to central government
@@ -275,7 +305,84 @@ struct Province {
     float       military_presence = 1000.0f; // garrison troops
     std::string dominant_culture;
     ResourceStock resource_yield;
-    bool        in_rebellion      = false;
+
+    // Physical geography & strategic resources
+    int         map_x             = 0;
+    int         map_y             = 0;
+    bool        has_port          = false;
+    bool        has_strategic_iron= false;
+    bool        has_oil_field     = false;
+    bool        has_uranium       = false;
+
+    // Military Occupation & Resistance
+    bool        is_occupied           = false;
+    int         occupier_civ_id       = -1;
+    float       occupation_resistance = 0.0f; // 0-100% resistance; sabotages supply and sparks uprisings
+    bool        in_rebellion          = false;
+};
+
+// ─── Peace Conferences & Treaties ─────────────────────────────────────────────
+struct PeaceDemand {
+    std::vector<int> demanded_province_ids;
+    float reparations_gold    = 0.0f;
+    bool  demilitarize_border = false;
+    bool  force_disarmament   = false;
+    bool  force_regime_change = false;
+};
+
+struct PeaceTreaty {
+    std::string treaty_name;          // e.g. "TREATY OF ELDORIA — 2318"
+    int         year_signed          = 0;
+    int         victor_civ_id        = -1;
+    int         defeated_civ_id      = -1;
+    std::vector<int> ceded_province_ids;
+    std::vector<std::string> ceded_province_names;
+    float       reparations_total    = 0.0f;
+    int         truce_duration_years = 12; // Peace guarantee duration
+    int         negotiation_rounds   = 3;
+    bool        is_white_peace       = false;
+};
+
+// ─── Historical Memory Record ────────────────────────────────────────────────
+struct HistoricalMemoryRecord {
+    int         aggressor_civ_id = -1;
+    int         victim_civ_id    = -1;
+    std::string event_type;       // "WAR_DECLARATION", "PROVINCE_CONQUEST", "CIVIL_WAR_AID", "BROKEN_TREATY", "PEACE_SETTLEMENT"
+    std::string description;
+    float       severity   = 1.0f;// 0.1 minor -> 1.0 major
+    int         year       = 0;
+    float       decay_rate = 0.02f;// Grievance fades 2% per year
+};
+
+// ─── Historical Eras ─────────────────────────────────────────────────────────
+enum class EraType {
+    AGE_OF_PROSPERITY,
+    GREAT_CONTINENTAL_WAR,
+    FRACTURED_PEACE,
+    REGIONAL_CRISIS,
+    RISE_OF_THE_COMMONS,
+    GOLDEN_AGE
+};
+
+inline const char* era_type_name(EraType e) {
+    switch (e) {
+        case EraType::AGE_OF_PROSPERITY:     return "The Age of Prosperity";
+        case EraType::GREAT_CONTINENTAL_WAR: return "The Great Continental War";
+        case EraType::FRACTURED_PEACE:       return "The Fractured Peace";
+        case EraType::REGIONAL_CRISIS:       return "The Era of State Collapse";
+        case EraType::RISE_OF_THE_COMMONS:   return "The Rise of The Commons";
+        case EraType::GOLDEN_AGE:            return "The Golden Age";
+    }
+    return "Historical Era";
+}
+
+struct HistoricalEra {
+    EraType     type       = EraType::AGE_OF_PROSPERITY;
+    std::string title;           // e.g. "THE NORDRAN CRISIS" or "THE GREAT CONTINENTAL WAR"
+    int         start_year = 2026;
+    int         end_year   = -1;
+    std::string primary_focus_civ;
+    std::string historical_summary;
 };
 
 // ─── War Objectives ───────────────────────────────────────────────────────────

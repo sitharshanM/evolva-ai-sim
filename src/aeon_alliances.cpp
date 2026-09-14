@@ -31,8 +31,24 @@ void AeonAllianceEngine::init() {
 
 AllyWarResponse AeonAllianceEngine::evaluate_war_response(int ally_id, int attacked_civ_id, int aggressor_civ_id, AeonEngine& engine) {
     if (ally_id < 0 || ally_id >= (int)engine.civs.size()) return AllyWarResponse::REMAIN_NEUTRAL;
+    if (attacked_civ_id < 0 || attacked_civ_id >= (int)engine.civs.size()) return AllyWarResponse::REMAIN_NEUTRAL;
+    if (aggressor_civ_id < 0 || aggressor_civ_id >= (int)engine.civs.size()) return AllyWarResponse::REMAIN_NEUTRAL;
+    if (ally_id == attacked_civ_id || ally_id == aggressor_civ_id) return AllyWarResponse::REMAIN_NEUTRAL;
+
     auto& ally = engine.civs[ally_id];
     if (ally.is_alive <= 0.0f || ally.at_war) return AllyWarResponse::REMAIN_NEUTRAL;
+
+    // Check bilateral truce with aggressor
+    if (ally.is_under_truce_with(aggressor_civ_id, engine.year) ||
+        engine.civs[aggressor_civ_id].is_under_truce_with(ally_id, engine.year)) {
+        return AllyWarResponse::REMAIN_NEUTRAL;
+    }
+
+    // Check if ally is also allied with aggressor - do not fight fellow ally
+    auto it_aggr = ally.relations.find(aggressor_civ_id);
+    if (it_aggr != ally.relations.end() && it_aggr->second == DiplomacyStatus::ALLY) {
+        return AllyWarResponse::REMAIN_NEUTRAL;
+    }
 
     const auto* rel_victim = engine.history.relation_view(ally_id, attacked_civ_id);
     const auto* rel_aggressor = engine.history.relation_view(ally_id, aggressor_civ_id);
@@ -97,8 +113,21 @@ void AeonAllianceEngine::tick_year(AeonEngine& engine) {
 
                     for (int ally_id : b.member_civ_ids) {
                         if (ally_id == civ_id || ally_id < 0 || ally_id >= (int)engine.civs.size()) continue;
+                        if (ally_id == enemy_id) continue;
                         auto& ally = engine.civs[ally_id];
                         if (ally.at_war) continue; // Already engaged
+
+                        // Do not declare war on a nation you are allied with!
+                        auto it_rel = ally.relations.find(enemy_id);
+                        if (it_rel != ally.relations.end() && it_rel->second == DiplomacyStatus::ALLY) {
+                            continue;
+                        }
+
+                        // Defensive alliances MUST NOT reactivate a war against a nation under an active truce
+                        if (ally.is_under_truce_with(enemy_id, engine.year) ||
+                            engine.civs[enemy_id].is_under_truce_with(ally_id, engine.year)) {
+                            continue;
+                        }
 
                         AllyWarResponse resp = evaluate_war_response(ally_id, civ_id, enemy_id, engine);
 
@@ -141,6 +170,15 @@ void AeonAllianceEngine::tick_year(AeonEngine& engine) {
 bool AeonAllianceEngine::form_alliance(int civ1_id, int civ2_id, AllianceType type, AeonEngine& engine) {
     if (civ1_id < 0 || civ2_id < 0 || civ1_id == civ2_id) return false;
     if (civ1_id >= (int)engine.civs.size() || civ2_id >= (int)engine.civs.size()) return false;
+    if (engine.civs[civ1_id].is_alive <= 0.0f || engine.civs[civ2_id].is_alive <= 0.0f) return false;
+    if (engine.civs[civ1_id].at_war || engine.civs[civ2_id].at_war) return false;
+
+    // Reject if already in an active alliance bloc together
+    for (const auto& b : blocs) {
+        bool has1 = std::find(b.member_civ_ids.begin(), b.member_civ_ids.end(), civ1_id) != b.member_civ_ids.end();
+        bool has2 = std::find(b.member_civ_ids.begin(), b.member_civ_ids.end(), civ2_id) != b.member_civ_ids.end();
+        if (has1 && has2) return false;
+    }
 
     AllianceBloc b;
     b.id = (int)blocs.size() + 1;

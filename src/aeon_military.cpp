@@ -2,6 +2,7 @@
 #include "aeon_engine.h"
 #include <algorithm>
 #include <cmath>
+#include <iostream>
 
 namespace Aeon {
 
@@ -60,6 +61,9 @@ void AeonMilitaryEngine::init_default_forces(const AeonEngine& engine) {
 void AeonMilitaryEngine::update_military_tick(AeonEngine& engine) {
     frontlines.clear();
 
+    // 0. Ensure all divisions have generals assigned
+    assign_generals_to_divisions(engine);
+
     // 1. Supply & Fuel Consumption / Attrition
     for (auto& div : divisions) {
         // Distance to capital
@@ -105,7 +109,7 @@ void AeonMilitaryEngine::update_military_tick(AeonEngine& engine) {
                 fz.intensity = 0.85f;
                 frontlines.push_back(fz);
 
-                // Combat damage between nearby opposing divisions
+                // Combat damage between nearby opposing divisions with general multipliers
                 for (auto& d1 : divisions) {
                     if (d1.civ_id != c1.id) continue;
                     for (auto& d2 : divisions) {
@@ -116,14 +120,178 @@ void AeonMilitaryEngine::update_military_tick(AeonEngine& engine) {
                         if (dx <= 2 && dy <= 2) {
                             d1.in_combat = true;
                             d2.in_combat = true;
-                            float dmg1 = (d2.personnel * 0.05f) * (1.0f - (d1.entrenchment / 200.0f));
-                            float dmg2 = (d1.personnel * 0.05f) * (1.0f - (d2.entrenchment / 200.0f));
+
+                            // Fetch commanding generals
+                            const AeonCharacter* gen1 = nullptr;
+                            const AeonCharacter* gen2 = nullptr;
+                            if (d1.general_character_id >= 0) {
+                                for (const auto& ch : engine.characters) {
+                                    if (ch.id == d1.general_character_id && ch.is_alive) { gen1 = &ch; break; }
+                                }
+                            }
+                            if (d2.general_character_id >= 0) {
+                                for (const auto& ch : engine.characters) {
+                                    if (ch.id == d2.general_character_id && ch.is_alive) { gen2 = &ch; break; }
+                                }
+                            }
+
+                            float mult1 = gen1 ? gen1->get_tactical_combat_multiplier() : 1.0f;
+                            float mult2 = gen2 ? gen2->get_tactical_combat_multiplier() : 1.0f;
+
+                            float dmg1 = (d2.personnel * 0.05f * mult2) * (1.0f - (d1.entrenchment / 200.0f));
+                            float dmg2 = (d1.personnel * 0.05f * mult1) * (1.0f - (d2.entrenchment / 200.0f));
                             d1.personnel = std::max(0.0f, d1.personnel - dmg1);
                             d2.personnel = std::max(0.0f, d2.personnel - dmg2);
                             d1.combat_experience = std::min(100.0f, d1.combat_experience + 2.0f);
                             d2.combat_experience = std::min(100.0f, d2.combat_experience + 2.0f);
                         }
                     }
+                }
+            }
+        }
+    }
+
+    // 3. Resolve territorial breakthroughs and province occupation
+    contest_provinces_in_frontlines(engine);
+}
+
+// ─── assign_generals_to_divisions ────────────────────────────────────────────
+void AeonMilitaryEngine::assign_generals_to_divisions(AeonEngine& engine) {
+    static const char* general_first_names[] = {
+        "Arctur", "Cassian", "Valerius", "Helena", "Theron", "Gaius", "Vaelor", "Darius", "Lyra", "Kaelen"
+    };
+    static const char* general_surnames[] = {
+        "Vale", "Thorne", "Vance", "Kroll", "Vane", "Stark", "Ironwood", "Morvaine", "Graves", "Calyx"
+    };
+
+    for (auto& div : divisions) {
+        if (div.general_character_id >= 0) {
+            bool alive = false;
+            for (const auto& ch : engine.characters) {
+                if (ch.id == div.general_character_id && ch.is_alive) { alive = true; break; }
+            }
+            if (alive) continue;
+        }
+
+        AeonCivilization* civ_ptr = nullptr;
+        for (auto& civ : engine.civs) {
+            if (civ.id == div.civ_id) { civ_ptr = &civ; break; }
+        }
+        if (!civ_ptr) continue;
+
+        int found_gen_id = -1;
+        for (int gid : civ_ptr->general_character_ids) {
+            for (auto& ch : engine.characters) {
+                if (ch.id == gid && ch.is_alive && ch.is_general && ch.commanded_division_id < 0) {
+                    found_gen_id = ch.id;
+                    ch.commanded_division_id = div.id;
+                    break;
+                }
+            }
+            if (found_gen_id >= 0) break;
+        }
+
+        if (found_gen_id >= 0) {
+            div.general_character_id = found_gen_id;
+        } else {
+            AeonCharacter gen;
+            gen.id = engine.next_char_id++;
+            gen.civ_id = div.civ_id;
+            int fn_idx = (gen.id * 7 + div.id * 13) % 10;
+            int sn_idx = (gen.id * 11 + div.id * 17) % 10;
+            gen.name = std::string("General ") + general_first_names[fn_idx] + " " + general_surnames[sn_idx];
+            gen.title = "General";
+            gen.age = 38 + (gen.id % 24);
+            gen.health = 95.0f;
+            gen.is_general = true;
+            gen.commanded_division_id = div.id;
+            gen.command_skill = 0.60f + (float(engine.rng.uniform_int(10, 35)) / 100.0f);
+            gen.loyalty_to_ruler = 0.65f + (float(engine.rng.uniform_int(10, 30)) / 100.0f);
+            gen.political_ambition = 0.40f + (float(engine.rng.uniform_int(10, 50)) / 100.0f);
+            gen.general_ideology = civ_ptr->national_ideology;
+
+            if (gen.command_skill > 0.85f) gen.military_traits.push_back("Brilliant Strategist");
+            if (gen.political_ambition > 0.75f) gen.military_traits.push_back("Politically Ambitious");
+            if (gen.loyalty_to_ruler > 0.85f) gen.military_traits.push_back("Iron Disciplinarian");
+            else gen.military_traits.push_back("Popular Commander");
+
+            div.general_character_id = gen.id;
+            civ_ptr->general_character_ids.push_back(gen.id);
+            civ_ptr->character_ids.push_back(gen.id);
+            engine.characters.push_back(gen);
+        }
+    }
+}
+
+// ─── contest_provinces_in_frontlines ─────────────────────────────────────────
+void AeonMilitaryEngine::contest_provinces_in_frontlines(AeonEngine& engine) {
+    for (const auto& fz : frontlines) {
+        if (fz.civ1_id < 0 || fz.civ2_id < 0) continue;
+        if (fz.civ1_id >= (int)engine.civs.size() || fz.civ2_id >= (int)engine.civs.size()) continue;
+
+        auto& c1 = engine.civs[fz.civ1_id];
+        auto& c2 = engine.civs[fz.civ2_id];
+        if (!c1.at_war || !c2.at_war) continue;
+
+        float power1 = 0.0f;
+        float power2 = 0.0f;
+        for (const auto& d : divisions) {
+            if (d.civ_id == c1.id && d.in_combat) power1 += d.personnel * d.supply_level * d.fuel_ammo;
+            if (d.civ_id == c2.id && d.in_combat) power2 += d.personnel * d.supply_level * d.fuel_ammo;
+        }
+
+        // c1 pushes into c2
+        if (power1 > power2 * 1.30f && power1 > 2500.0f) {
+            for (auto& prov : c2.provinces) {
+                if (!prov.is_occupied) {
+                    prov.is_occupied = true;
+                    prov.occupier_civ_id = c1.id;
+                    prov.occupation_resistance = 65.0f;
+                    c2.war_exhaustion = std::min(100.0f, c2.war_exhaustion + 8.0f);
+                    c2.stability = std::max(5.0f, c2.stability - 5.0f);
+                    c1.morale = std::min(100.0f, c1.morale + 4.0f);
+
+                    c2.bilateral_relations[c1.id].provinces_lost++;
+                    c1.bilateral_relations[c2.id].provinces_taken++;
+                    c2.bilateral_relations[c1.id].hatred = std::min(100.0f, c2.bilateral_relations[c1.id].hatred + 20.0f);
+                    c2.bilateral_relations[c1.id].border_claim_score = std::min(100.0f, c2.bilateral_relations[c1.id].border_claim_score + 30.0f);
+
+                    engine.history.record(engine.year, engine.month, "WAR",
+                        c1.name + " occupies " + prov.name + " from " + c2.name,
+                        "Following battlefield breakthrough, " + c1.name + " forces occupy " + prov.name +
+                        " (" + std::to_string(prov.factories) + " factories, " + std::to_string(prov.population / 1000) + "k pop).",
+                        c1.id, c2.id, {"territorial_conquest"}, 0.85f);
+
+                    std::cout << "[YEAR " << engine.year << "] 🚩 TERRITORIAL CONQUEST: "
+                              << c1.name << " occupies " << prov.name << " from " << c2.name
+                              << " (" << prov.factories << " factories, " << (prov.population / 1000) << "k pop, resistance: 65%)!\n";
+                    break;
+                }
+            }
+        } else if (power2 > power1 * 1.30f && power2 > 2500.0f) {
+            // Counter-offensive
+            for (auto& prov : c1.provinces) {
+                if (!prov.is_occupied) {
+                    prov.is_occupied = true;
+                    prov.occupier_civ_id = c2.id;
+                    prov.occupation_resistance = 65.0f;
+                    c1.war_exhaustion = std::min(100.0f, c1.war_exhaustion + 8.0f);
+                    c1.stability = std::max(5.0f, c1.stability - 5.0f);
+                    c2.morale = std::min(100.0f, c2.morale + 4.0f);
+
+                    c1.bilateral_relations[c2.id].provinces_lost++;
+                    c2.bilateral_relations[c1.id].provinces_taken++;
+                    c1.bilateral_relations[c2.id].hatred = std::min(100.0f, c1.bilateral_relations[c2.id].hatred + 20.0f);
+                    c1.bilateral_relations[c2.id].border_claim_score = std::min(100.0f, c1.bilateral_relations[c2.id].border_claim_score + 30.0f);
+
+                    engine.history.record(engine.year, engine.month, "WAR",
+                        c2.name + " occupies " + prov.name + " from " + c1.name,
+                        "Following counter-offensive, " + c2.name + " forces occupy " + prov.name + ".",
+                        c2.id, c1.id, {"territorial_conquest"}, 0.85f);
+
+                    std::cout << "[YEAR " << engine.year << "] 🚩 TERRITORIAL COUNTER-OFFENSIVE: "
+                              << c2.name << " occupies " << prov.name << " from " << c1.name << "!\n";
+                    break;
                 }
             }
         }

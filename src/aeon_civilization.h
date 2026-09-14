@@ -209,6 +209,12 @@ struct BilateralRelation {
     int   last_treaty_year   = -999;
     int   last_war_year      = -999;
     int   broken_treaties    = 0;
+    int   truce_until_year   = -999;   // Peace guarantee expiry year (no wars allowed during truce)
+    int   wars_fought        = 0;      // Historical war count
+    int   provinces_lost     = 0;      // Provinces lost to this rival
+    int   provinces_taken    = 0;      // Provinces taken from this rival
+    float border_claim_score = 0.0f;   // 0-100 desire to reclaim ancestral territory
+    float war_memory_weight  = 0.0f;   // 0-100 long-term memory of wars
 
     std::vector<DiplomaticInteractionRecord> interaction_history;
 
@@ -415,9 +421,16 @@ struct AeonCivilization {
     float        religiosity  = 0.4f;
     std::string  culture_desc;
     std::string  ideology;      // Militarism, Mercantilism, Scientism...
+    IdeologyType national_ideology = IdeologyType::MONARCHISM;
     std::string  cultural_values;
     std::string  military_traditions;
     std::string  scientific_traditions;
+
+    // Military Generals & Commanders
+    std::vector<int> general_character_ids;
+
+    // Treaties & Truces
+    std::vector<PeaceTreaty> signed_treaties;
 
     // Internal Factions (9 Types)
     std::vector<InternalFaction> factions;
@@ -436,6 +449,21 @@ struct AeonCivilization {
 
     void tick_year(int year, float dt_years);
     void init_default_factions();
+    void init_default_provinces();
+    void calculate_provincial_yields();
+    bool is_under_truce_with(int other_civ_id, int current_year) const {
+        auto it = bilateral_relations.find(other_civ_id);
+        if (it != bilateral_relations.end() && it->second.truce_until_year >= current_year) {
+            return true;
+        }
+        for (const auto& treaty : signed_treaties) {
+            if ((treaty.victor_civ_id == other_civ_id || treaty.defeated_civ_id == other_civ_id) &&
+                (treaty.year_signed + treaty.truce_duration_years >= current_year)) {
+                return true;
+            }
+        }
+        return false;
+    }
     bool check_civil_war(int year);
 
     // Carrying capacity helper

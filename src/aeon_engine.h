@@ -177,6 +177,7 @@ public:
 
     void apply_decision(int civ_idx, const AIDecision& dec);
     void check_war_resolution(int year);
+    void resolve_peace_conference(int civ1_id, int civ2_id, int current_year);
     void check_council_formation(int year);
     AeonCivilization make_civilization(int id, const std::string& name,
                                        int cap_x, int cap_y, char map_char,

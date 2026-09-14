@@ -51,6 +51,7 @@ struct MilitaryDivision {
     float entrenchment = 0.0f;     // 0.0 to 100.0
     float combat_experience = 10.0f; // 0.0 to 100.0
     bool  in_combat = false;
+    int   general_character_id = -1;   // Assigned commander
     // Accuracy additions
     bool  deployed  = false;           // is unit deployed outside home territory
     int   siege_target_city_id = -1;   // -1 = not besieging any city
@@ -73,6 +74,8 @@ public:
     AeonMilitaryEngine();
     void init_default_forces(const AeonEngine& engine);
     void update_military_tick(AeonEngine& engine);
+    void assign_generals_to_divisions(AeonEngine& engine);
+    void contest_provinces_in_frontlines(AeonEngine& engine);
 
     const char* get_unit_type_name(UnitType type) const;
     float get_civ_total_military_power(int civ_id) const;

@@ -182,6 +182,138 @@ void AeonCivilization::tick_year(int year, float /*dt_years*/) {
     else if (economy.gdp < 300.0f || resources.food < 150.0f) crisis_state = CrisisState::ECONOMIC_CRISIS;
     else if (unrest > 50.0f) crisis_state = CrisisState::CIVIL_UNREST;
     else crisis_state = CrisisState::NORMAL;
+
+    // ── 9. Provincial Yields & Resistance Tick ───────────────────────────────
+    if (provinces.empty()) {
+        init_default_provinces();
+    }
+    calculate_provincial_yields();
+
+    // ── 10. Historical Memory & Revanchism Decay ──────────────────────────────
+    for (auto& kv : bilateral_relations) {
+        auto& rel = kv.second;
+        rel.hatred = std::max(0.0f, rel.hatred - 0.35f);
+        rel.fear   = std::max(0.0f, rel.fear - 0.70f);
+        rel.war_memory_weight = std::max(0.0f, rel.war_memory_weight - 0.50f);
+        if (rel.border_claim_score > 0.0f) {
+            // Revanchism persists as long as provinces remain lost
+            rel.border_claim_score = std::min(100.0f, rel.border_claim_score + 0.2f);
+        }
+    }
+}
+
+// ─── init_default_provinces ──────────────────────────────────────────────────
+void AeonCivilization::init_default_provinces() {
+    provinces.clear();
+
+    auto add_prov = [&](int pid, const std::string& pname, long long pop, float pgdp, int pfac,
+                        bool port, bool iron, bool oil, bool uranium, int mx, int my) {
+        Province p;
+        p.id = pid;
+        p.name = pname;
+        p.civ_id = id;
+        p.original_civ_id = id;
+        p.population = pop;
+        p.gdp = pgdp;
+        p.factories = pfac;
+        p.stability = stability;
+        p.unrest = unrest;
+        p.loyalty = 85.0f;
+        p.dominant_culture = name;
+        p.has_port = port;
+        p.has_strategic_iron = iron;
+        p.has_oil_field = oil;
+        p.has_uranium = uranium;
+        p.map_x = mx;
+        p.map_y = my;
+        p.resource_yield.food = float(pop) * 0.0001f;
+        p.resource_yield.iron = iron ? 40.0f : 5.0f;
+        p.resource_yield.oil = oil ? 30.0f : 2.0f;
+        p.resource_yield.uranium = uranium ? 15.0f : 0.0f;
+        provinces.push_back(p);
+    };
+
+    if (id == 0) { // NORDRA
+        add_prov(1, "Arkan Valley", 140000, 250.0f, 6, false, true, false, false, capital_x - 3, capital_y + 1);
+        add_prov(2, "Nordran Heartland", 180000, 320.0f, 8, false, false, false, false, capital_x, capital_y);
+        add_prov(3, "Krag Coast", 110000, 210.0f, 4, true, false, false, false, capital_x + 4, capital_y - 2);
+        add_prov(4, "Frostmark Highlands", 83000, 140.0f, 3, false, false, false, true, capital_x - 2, capital_y - 4);
+    } else if (id == 1) { // ELDORIA
+        add_prov(5, "Eldorian Cradle", 170000, 300.0f, 7, true, false, false, false, capital_x, capital_y);
+        add_prov(6, "Silverwood", 130000, 240.0f, 5, false, false, false, false, capital_x + 2, capital_y + 3);
+        add_prov(7, "High Terrace", 120000, 210.0f, 4, false, true, false, false, capital_x - 3, capital_y - 2);
+        add_prov(8, "Whispering Vale", 93000, 180.0f, 3, false, false, false, false, capital_x + 4, capital_y);
+    } else if (id == 2) { // VALORIA
+        add_prov(9, "Valorian Glade", 180000, 290.0f, 6, false, false, false, false, capital_x, capital_y);
+        add_prov(10, "Mistral Pass", 110000, 200.0f, 4, false, true, false, false, capital_x - 2, capital_y + 3);
+        add_prov(11, "Azure Shore", 130000, 260.0f, 5, true, false, false, false, capital_x + 3, capital_y - 2);
+        add_prov(12, "Greenfell", 93000, 170.0f, 3, false, false, false, false, capital_x - 4, capital_y - 1);
+    } else if (id == 3) { // DRAKOR
+        add_prov(13, "Drakor Caldera", 160000, 280.0f, 7, false, true, false, false, capital_x, capital_y);
+        add_prov(14, "Obsidian Peaks", 120000, 210.0f, 5, false, false, false, true, capital_x - 3, capital_y + 2);
+        add_prov(15, "Iron Basin", 140000, 230.0f, 6, false, true, false, false, capital_x + 3, capital_y - 3);
+        add_prov(16, "Bloodmarsh", 93000, 150.0f, 3, false, false, true, false, capital_x + 2, capital_y + 4);
+    } else if (id == 4) { // SOLARIA
+        add_prov(17, "Solarian Plains", 190000, 310.0f, 7, false, false, false, false, capital_x, capital_y);
+        add_prov(18, "Sunspire", 160000, 290.0f, 6, true, false, false, false, capital_x + 4, capital_y + 1);
+        add_prov(19, "Golden Reach", 130000, 220.0f, 4, false, false, true, false, capital_x - 3, capital_y - 2);
+        add_prov(20, "Amber Coast", 106000, 190.0f, 4, true, false, false, false, capital_x - 1, capital_y + 4);
+    } else if (is_commons) { // THE COMMONS
+        add_prov(21, "Grand Financial District", 40000000LL, 3500.0f, 30, true, false, false, false, capital_x, capital_y);
+        add_prov(22, "Common Market Basin", 35000000LL, 2800.0f, 25, false, false, false, false, capital_x + 2, capital_y + 2);
+        add_prov(23, "Free Port Terminals", 27929000LL, 2200.0f, 20, true, false, false, false, capital_x - 2, capital_y - 2);
+    } else {
+        // Splinter or newly emerged realm
+        add_prov(id * 10 + 1, name + " Heartland", 150000, 250.0f, 5, false, false, false, false, capital_x, capital_y);
+        add_prov(id * 10 + 2, name + " Borderland", 90000, 160.0f, 3, false, true, false, false, capital_x + 2, capital_y + 1);
+        add_prov(id * 10 + 3, name + " Outskirts", 60000, 110.0f, 2, false, false, true, false, capital_x - 2, capital_y - 1);
+    }
+}
+
+// ─── calculate_provincial_yields ─────────────────────────────────────────────
+void AeonCivilization::calculate_provincial_yields() {
+    float bonus_gdp = 0.0f;
+    float bonus_iron = 0.0f;
+    float bonus_oil = 0.0f;
+    float bonus_uranium = 0.0f;
+
+    for (auto& prov : provinces) {
+        if (!prov.is_occupied) {
+            // Province produces normally for its sovereign
+            bonus_gdp += prov.factories * 12.0f + (prov.has_port ? 30.0f : 0.0f);
+            if (prov.has_strategic_iron) bonus_iron += 25.0f;
+            if (prov.has_oil_field)      bonus_oil += 20.0f;
+            if (prov.has_uranium)        bonus_uranium += 10.0f;
+
+            // Natural resistance decay in peaceful home provinces
+            prov.occupation_resistance = std::max(0.0f, prov.occupation_resistance - 5.0f);
+            prov.stability = std::clamp(prov.stability + 0.5f, 0.0f, 100.0f);
+        } else {
+            // Under foreign occupation!
+            // Resistance grows if occupation persists
+            prov.occupation_resistance = std::min(100.0f, prov.occupation_resistance + 4.0f);
+            prov.stability = std::max(5.0f, prov.stability - 3.0f);
+            prov.unrest = std::min(100.0f, prov.unrest + 5.0f);
+        }
+    }
+
+    economy.manufacturing_output = 100.0f + bonus_gdp;
+    economy.gdp += bonus_gdp * 0.15f;
+    resources.iron = std::min(10000.0f, resources.iron + bonus_iron);
+    resources.oil  = std::min(10000.0f, resources.oil + bonus_oil);
+    resources.uranium = std::min(10000.0f, resources.uranium + bonus_uranium);
+}
+
+
+// ─── check_civil_war ─────────────────────────────────────────────────────────
+bool AeonCivilization::check_civil_war(int year) {
+    (void)year;
+    if (is_commons || is_alive <= 0.0f) return false;
+    // Condition-driven crisis: Extremely low stability + high exhaustion/unrest/military discontent
+    if (stability < 15.0f && (unrest > 55.0f || war_exhaustion > 50.0f || military_discontent > 40.0f)) {
+        return true;
+    }
+    return false;
 }
 
 } // namespace Aeon

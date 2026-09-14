@@ -88,6 +88,7 @@ private:
     void draw_central_banking_tab(AeonEngine& engine);
     void draw_agent_control_tab(AeonEngine& engine);
     void draw_rebellion_tab(AeonEngine& engine);
+    void draw_sovereignty_tab(AeonEngine& engine);
     void draw_nuclear_tab(AeonEngine& engine);
     void draw_space_race_tab(AeonEngine& engine);
     void draw_dynasty_tab(AeonEngine& engine);

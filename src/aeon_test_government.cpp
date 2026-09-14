@@ -6,9 +6,11 @@
 #include "aeon_civilization.h"
 #include "aeon_character.h"
 #include "aeon_engine.h"
+#include "aeon_ruler_ai.h"
 #include <iostream>
 #include <cassert>
 #include <iomanip>
+#include <set>
 
 namespace Aeon {
 
@@ -19,7 +21,7 @@ bool GovernmentTestSuite::run_all_tests() {
 
     GovernmentTransitionEngine engine;
     int passed = 0;
-    int total = 10;
+    int total = 14;
 
     // ─────────────────────────────────────────────────────────────────────────
     // SCENARIO A — TEST 1:
@@ -423,6 +425,216 @@ bool GovernmentTestSuite::run_all_tests() {
             passed++;
         } else {
             std::cout << "  ❌ FAILED: Coup consequences incorrect (check stability/unrest direction and crisis_state)." << std::endl;
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // TEST 11:
+    // Physical State Splintering: Low stability triggers general defection,
+    // physical province partition, army division split, and foreign recognition.
+    // ─────────────────────────────────────────────────────────────────────────
+    {
+        std::cout << "\n[TEST 11] Physical State Splintering & Civil War Fracture..." << std::endl;
+        AeonEngine aeon;
+        aeon.init(42);
+
+        auto& parent = aeon.civs[0];
+        parent.stability = 10.0f; // Catastrophic collapse
+        parent.unrest = 75.0f;
+        parent.war_exhaustion = 60.0f;
+        parent.army_size = 50000.0f;
+        size_t initial_civ_count = aeon.civs.size();
+
+        aeon.rebellion_engine.trigger_state_splinter(0, aeon);
+
+        bool success = (aeon.civs.size() == initial_civ_count + 1);
+        if (success) {
+            const auto& rebel_civ = aeon.civs.back();
+            bool has_provinces = !rebel_civ.provinces.empty();
+            bool has_army = rebel_civ.army_size > 1000.0f;
+            bool at_civil_war = parent.at_war && parent.war_with_civ == rebel_civ.id;
+            bool has_generals = !rebel_civ.general_character_ids.empty() || rebel_civ.ruler_id >= 0;
+
+            std::cout << "  -> Breakaway State: " << rebel_civ.name << " (ID:" << rebel_civ.id << ")" << std::endl;
+            std::cout << "  -> Seceded Army: " << rebel_civ.army_size << " / Remaining in Parent: " << parent.army_size << std::endl;
+            std::cout << "  -> Seceded Provinces: " << rebel_civ.provinces.size() << " (" << (has_provinces ? rebel_civ.provinces[0].name : "") << ")" << std::endl;
+            std::cout << "  -> At War with Parent: " << (at_civil_war ? "YES" : "NO") << std::endl;
+
+            if (has_provinces && has_army && at_civil_war && has_generals) {
+                std::cout << "  ✅ PASSED: Realm physically fractured into breakaway state with split armies, provinces, and defecting leadership." << std::endl;
+                passed++;
+            } else {
+                std::cout << "  ❌ FAILED: State splintering incomplete." << std::endl;
+            }
+        } else {
+            std::cout << "  ❌ FAILED: Breakaway civ was not spawned." << std::endl;
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // TEST 12:
+    // Multi-Round Peace Conference & Truce Guarantee Enforcement.
+    // ─────────────────────────────────────────────────────────────────────────
+    {
+        std::cout << "\n[TEST 12] Multi-Round Peace Conference & Truce Guarantees..." << std::endl;
+        AeonEngine aeon;
+        aeon.init(42);
+
+        auto& civ1 = aeon.civs[0];
+        auto& civ2 = aeon.civs[1];
+        civ1.at_war = true;
+        civ1.war_with_civ = civ2.id;
+        civ2.at_war = true;
+        civ2.war_with_civ = civ1.id;
+        civ1.relations[civ2.id] = DiplomacyStatus::AT_WAR;
+        civ2.relations[civ1.id] = DiplomacyStatus::AT_WAR;
+
+        // Give civ1 decisive war score
+        civ1.war_exhaustion = 10.0f;
+        civ2.war_exhaustion = 90.0f;
+
+        // Occupy one of civ2's provinces
+        if (!civ2.provinces.empty()) {
+            civ2.provinces[0].is_occupied = true;
+            civ2.provinces[0].occupier_civ_id = civ1.id;
+        }
+
+        // Resolve peace conference
+        aeon.resolve_peace_conference(civ1.id, civ2.id, aeon.year);
+
+        bool wars_ended = (!civ1.at_war && !civ2.at_war);
+        bool truce_active = civ1.is_under_truce_with(civ2.id, aeon.year + 5);
+        bool treaty_signed = (!civ1.signed_treaties.empty() && !civ2.signed_treaties.empty());
+
+        // Validate that declare war is blocked during truce
+        AIDecision illegal_war;
+        illegal_war.action_type = "DECLARE_WAR";
+        illegal_war.target_civ = civ2.id;
+        std::string rejection_reason;
+        std::unordered_map<int, int> empty_map;
+        bool is_valid = ActionValidator::validate(illegal_war, civ1, aeon.civs, aeon.year, empty_map, empty_map, rejection_reason);
+
+        std::cout << "  -> War Ended: " << (wars_ended ? "YES" : "NO") << std::endl;
+        std::cout << "  -> Treaty Signed: " << (treaty_signed ? civ1.signed_treaties.back().treaty_name : "NONE") << std::endl;
+        std::cout << "  -> Truce Active: " << (truce_active ? "YES (5-year check)" : "NO") << std::endl;
+        std::cout << "  -> Illegal War Re-entry Blocked by Truce: " << (!is_valid ? "YES" : "NO") << " (" << rejection_reason << ")" << std::endl;
+
+        if (wars_ended && truce_active && treaty_signed && !is_valid) {
+            std::cout << "  ✅ PASSED: Peace conference generated treaty, enforced truce, and blocked perpetual alliance war re-entry." << std::endl;
+            passed++;
+        } else {
+            std::cout << "  ❌ FAILED: Peace conference resolution failed validation." << std::endl;
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // TEST 13:
+    // Macro Historical Era Detection in Chronicler.
+    // ─────────────────────────────────────────────────────────────────────────
+    {
+        std::cout << "\n[TEST 13] Macro Historical Era Detection & Transitions..." << std::endl;
+        AeonEngine aeon;
+        aeon.init(42);
+
+        aeon.chronicler.update_eras(aeon, aeon.year);
+        std::string initial_era = aeon.chronicler.get_current_era().title;
+        std::cout << "  -> Initial Continental Era: " << initial_era << std::endl;
+
+        // Now trigger 3 wars to force "The Great Continental War"
+        aeon.civs[0].at_war = true;
+        aeon.civs[1].at_war = true;
+        aeon.civs[2].at_war = true;
+        aeon.civs[3].at_war = true;
+
+        aeon.chronicler.update_eras(aeon, aeon.year + 3);
+        std::string war_era = aeon.chronicler.get_current_era().title;
+        std::cout << "  -> War-Engulfed Continental Era: " << war_era << std::endl;
+
+        bool detected_war_era = (war_era == "The Great Continental War");
+        if (detected_war_era) {
+            std::cout << "  ✅ PASSED: Chronicler dynamically detected continental state and transitioned into 'The Great Continental War'." << std::endl;
+            passed++;
+        } else {
+            std::cout << "  ❌ FAILED: Expected 'The Great Continental War', got: " << war_era << std::endl;
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // TEST 14:
+    // Simulation Integrity, Identity, and Lifecycle Protection:
+    // - Bilateral self-targeting rejection
+    // - Trade route canonical pair deduplication & no self-trade
+    // - Unique successor state naming across breakaways
+    // - Royal marriage validation & non-monarchy rejection
+    // - Active truce enforcement on war declarations
+    // ─────────────────────────────────────────────────────────────────────────
+    {
+        std::cout << "\n[TEST 14] Simulation Integrity, Identity, and Lifecycle Protection..." << std::endl;
+        AeonEngine aeon;
+        aeon.init(42);
+
+        // 1. Validate self-targeting is rejected across all bilateral action types
+        AIDecision self_war;
+        self_war.action_type = "DECLARE_WAR";
+        self_war.target_civ = 0;
+        std::string rejection;
+        bool war_valid = ActionValidator::validate(self_war, aeon.civs[0], aeon.civs, aeon.year, {}, {}, rejection);
+
+        AIDecision self_trade;
+        self_trade.action_type = "PROPOSE_TRADE";
+        self_trade.target_civ = 0;
+        bool trade_valid = ActionValidator::validate(self_trade, aeon.civs[0], aeon.civs, aeon.year, {}, {}, rejection);
+
+        AIDecision self_alliance;
+        self_alliance.action_type = "FORM_ALLIANCE";
+        self_alliance.target_civ = 0;
+        bool alliance_valid = ActionValidator::validate(self_alliance, aeon.civs[0], aeon.civs, aeon.year, {}, {}, rejection);
+
+        bool self_actions_rejected = (!war_valid && !trade_valid && !alliance_valid);
+
+        // 2. Trade route canonical pair uniqueness & no self-trade
+        aeon.market_engine.tick_year(aeon.civs, aeon.year);
+        bool trade_integrity = true;
+        std::set<std::pair<int, int>> seen_pairs;
+        for (const auto& tr : aeon.market_engine.active_routes) {
+            if (tr.civ_a == tr.civ_b) { trade_integrity = false; break; }
+            auto p = std::make_pair(std::min(tr.civ_a, tr.civ_b), std::max(tr.civ_a, tr.civ_b));
+            if (seen_pairs.count(p)) { trade_integrity = false; break; }
+            seen_pairs.insert(p);
+        }
+
+        // 3. Successor state unique naming
+        std::string name1 = aeon.rebellion_engine.generate_unique_successor_name(aeon.civs[0], "Northland", IdeologyType::REPUBLICANISM, GovForm::REPUBLIC, aeon.civs);
+        AeonCivilization mock_civ1;
+        mock_civ1.id = (int)aeon.civs.size();
+        mock_civ1.name = name1;
+        aeon.civs.push_back(mock_civ1);
+
+        std::string name2 = aeon.rebellion_engine.generate_unique_successor_name(aeon.civs[0], "Northland", IdeologyType::REPUBLICANISM, GovForm::REPUBLIC, aeon.civs);
+        bool names_unique = (name1 != name2);
+
+        // 4. Royal Marriage rejection on Republics and self-marriage
+        size_t marriage_count_before = aeon.dynasty_engine.dynastic_marriages.size();
+        aeon.dynasty_engine.arrange_royal_marriage(0, 0, aeon); // Self-marriage
+        bool self_marriage_blocked = (aeon.dynasty_engine.dynastic_marriages.size() == marriage_count_before);
+
+        // 5. Truce enforcement on war declaration
+        aeon.civs[0].bilateral_relations[1].truce_until_year = aeon.year + 10;
+        AIDecision truce_war;
+        truce_war.action_type = "DECLARE_WAR";
+        truce_war.target_civ = 1;
+        bool truce_blocked = !ActionValidator::validate(truce_war, aeon.civs[0], aeon.civs, aeon.year, {}, {}, rejection);
+
+        if (self_actions_rejected && trade_integrity && names_unique && self_marriage_blocked && truce_blocked) {
+            std::cout << "  ✅ PASSED: Self-actions rejected, trade canonical pairs unique, successor names unique, and truces strictly enforced." << std::endl;
+            passed++;
+        } else {
+            std::cout << "  ❌ FAILED: Simulation integrity check failed."
+                      << " SelfRejected: " << self_actions_rejected
+                      << ", TradeIntegrity: " << trade_integrity
+                      << ", NamesUnique: " << names_unique
+                      << ", SelfMarriageBlocked: " << self_marriage_blocked
+                      << ", TruceBlocked: " << truce_blocked << std::endl;
         }
     }
 

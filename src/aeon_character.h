@@ -157,8 +157,21 @@ struct AeonCharacter {
     // Heirs / family
     std::vector<int> heirs; // character IDs
 
+    // Military Commander & General Roles
+    bool        is_general            = false;
+    int         commanded_division_id = -1;
+    float       command_skill         = 0.5f; // 0.0 to 1.0 (tactical battle prowess)
+    float       loyalty_to_ruler      = 0.7f; // 0.0 to 1.0 (degrades with war exhaustion & low stability)
+    float       political_ambition    = 0.5f; // 0.0 to 1.0 (ambition to launch coups / defect)
+    IdeologyType general_ideology     = IdeologyType::MILITARISM;
+    std::vector<std::string> military_traits; // e.g. "Brilliant Strategist", "Popular Commander", "Politically Ambitious"
+    float       reputation_with_army  = 70.0f;// 0..100% devotion from rank-and-file soldiers
+
     void age_one_year();
     bool check_natural_death(int year) const;
+    bool will_refuse_order(float realm_stability, float ruler_popularity) const;
+    bool has_trait(const std::string& trait_name) const;
+    float get_tactical_combat_multiplier() const;
 
     // Get dominant skill score (0.0 to 1.0)
     float get_effective_skill() const {

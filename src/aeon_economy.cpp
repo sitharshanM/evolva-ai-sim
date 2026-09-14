@@ -58,6 +58,7 @@ void GlobalMarketEngine::update_trade_routes(std::vector<AeonCivilization>& civs
         for (size_t j = i + 1; j < civs.size(); ++j) {
             auto& c1 = civs[i];
             auto& c2 = civs[j];
+            if (c1.id == c2.id) continue;
             if (c1.is_alive <= 0.0f || c2.is_alive <= 0.0f) continue;
             if (c1.at_war || c2.at_war) continue;
 
@@ -68,11 +69,12 @@ void GlobalMarketEngine::update_trade_routes(std::vector<AeonCivilization>& civs
                 c1.economy.gdp += 50.0f;
                 c2.economy.gdp += 50.0f;
 
-                // Check if route exists
+                // Check if route exists using canonical pair
+                int pair_a = std::min(c1.id, c2.id);
+                int pair_b = std::max(c1.id, c2.id);
                 bool exists = false;
                 for (const auto& r : active_routes) {
-                    if ((r.civ_a == c1.id && r.civ_b == c2.id) ||
-                        (r.civ_a == c2.id && r.civ_b == c1.id)) {
+                    if (std::min(r.civ_a, r.civ_b) == pair_a && std::max(r.civ_a, r.civ_b) == pair_b) {
                         exists = true;
                         break;
                     }
@@ -80,8 +82,8 @@ void GlobalMarketEngine::update_trade_routes(std::vector<AeonCivilization>& civs
                 if (!exists) {
                     TradeRoute tr;
                     tr.id = next_route_id++;
-                    tr.civ_a = c1.id;
-                    tr.civ_b = c2.id;
+                    tr.civ_a = pair_a;
+                    tr.civ_b = pair_b;
                     tr.origin_city = c1.name + " Capital";
                     tr.dest_city   = c2.name + " Capital";
                     tr.primary_good = "Wood & Iron";
@@ -90,7 +92,8 @@ void GlobalMarketEngine::update_trade_routes(std::vector<AeonCivilization>& civs
                     active_routes.push_back(tr);
 
                     std::cout << "[YEAR " << year << "] TRADE ROUTE FORMED between "
-                              << c1.name << " and " << c2.name << "!" << std::endl;
+                              << c1.name << " [ID:" << c1.id << "] and "
+                              << c2.name << " [ID:" << c2.id << "]!" << std::endl;
                 }
             }
         }

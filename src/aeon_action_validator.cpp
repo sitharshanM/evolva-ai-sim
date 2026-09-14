@@ -102,13 +102,29 @@ bool ActionValidator::validate(const AIDecision& dec,
             out_reason = "REJECTED: DECLARE_WAR requires a valid target civilization";
             return false;
         }
-        if (self.at_war) {
-            out_reason = "REJECTED: " + self.name + " is already at war";
+        const auto& target = all_civs[dec.target_civ];
+        if (self.relations.count(dec.target_civ) && self.relations.at(dec.target_civ) == DiplomacyStatus::AT_WAR) {
+            out_reason = "REJECTED: Already at war with " + target.name;
             return false;
         }
-        const auto& target = all_civs[dec.target_civ];
+        if (self.at_war && self.war_with_civ == dec.target_civ) {
+            out_reason = "REJECTED: Already engaged in active war against " + target.name;
+            return false;
+        }
+        if (target.at_war && target.war_with_civ == self.id) {
+            out_reason = "REJECTED: " + target.name + " is already engaged in active war against us";
+            return false;
+        }
+        if (self.at_war) {
+            out_reason = "REJECTED: " + self.name + " is already at war with another realm";
+            return false;
+        }
         if (target.at_war) {
             out_reason = "REJECTED: Target " + target.name + " is already engaged in war";
+            return false;
+        }
+        if (self.is_under_truce_with(dec.target_civ, current_year) || target.is_under_truce_with(self.id, current_year)) {
+            out_reason = "REJECTED: Active peace guarantee / truce settlement in effect with " + target.name;
             return false;
         }
         auto cd_it = war_cooldown.find(dec.target_civ);

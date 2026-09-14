@@ -6,6 +6,7 @@
 #include <sstream>
 #include <cmath>
 #include <iomanip>
+#include <set>
 
 namespace Aeon {
 
@@ -41,14 +42,38 @@ AeonCivilization AeonEngine::make_civilization(
 // ─────────────────────────────────────────────────────────────────────────────
 AeonCharacter AeonEngine::make_ruler(int id, const std::string& name,
                                       int civ_id, int birth_year) {
-    static const char* titles[] = {
-        "High Sovereign", "Emperor", "Empress", "King", "Queen",
-        "Archon", "Grand Duke", "High Chancellor", "Consul", "Prime Minister"
+    GovForm gov = GovForm::MONARCHY;
+    if (civ_id >= 0 && civ_id < (int)civs.size()) {
+        gov = civs[civ_id].government;
+    }
+
+    static const char* royal_titles[] = {
+        "King", "Queen", "Grand Duke", "High Sovereign"
     };
+    static const char* imperial_titles[] = {
+        "Emperor", "Empress", "Imperator", "High Sovereign"
+    };
+    static const char* democratic_titles[] = {
+        "President", "Chancellor", "Prime Minister", "Consul"
+    };
+    static const char* junta_titles[] = {
+        "Generalissimo", "Lord General", "Commander-in-Chief", "Field Marshal"
+    };
+    static const char* theocratic_titles[] = {
+        "High Patriarch", "Hierophant", "Archbishop", "Grand Inquisitor"
+    };
+    static const char* autocratic_titles[] = {
+        "Supreme Leader", "Chairman", "General Secretary", "Lord Protector"
+    };
+
     static const char* first_names[] = {
         "Aurelius", "Valeria", "Thorne", "Seraphina", "Kaelen",
         "Theodora", "Balian", "Helena", "Darius", "Lyanna",
         "Cassian", "Miriel", "Alaric", "Vaelor", "Isolde"
+    };
+    static const char* last_names[] = {
+        "Thorne", "Vaelor", "Darius", "Alaric", "Sterling",
+        "Kaelen", "Hawthorne", "Blackwood", "Ashford", "Mercer"
     };
 
     AeonCharacter r;
@@ -61,14 +86,39 @@ AeonCharacter AeonEngine::make_ruler(int id, const std::string& name,
     r.reputation = 60.0f;
 
     if (name.empty() || name.find("Successor of") != std::string::npos || name.find("High Sovereign of") != std::string::npos) {
-        int t_idx = rng.uniform_int(0, 9);
-        int n_idx = rng.uniform_int(0, 14);
+        int fn_idx = rng.uniform_int(0, 14);
+        int ln_idx = rng.uniform_int(0, 9);
         std::string roman[] = {"I", "II", "III", "IV", "V"};
         int r_idx = rng.uniform_int(0, 4);
-        r.title = titles[t_idx];
-        r.name  = std::string(titles[t_idx]) + " " + first_names[n_idx] + " " + roman[r_idx];
+
+        if (gov == GovForm::REPUBLIC || gov == GovForm::DEMOCRACY || gov == GovForm::FEDERATION) {
+            int t_idx = rng.uniform_int(0, 3);
+            r.title = democratic_titles[t_idx];
+            r.name  = std::string(democratic_titles[t_idx]) + " " + first_names[fn_idx] + " " + last_names[ln_idx];
+        } else if (gov == GovForm::MILITARY_JUNTA) {
+            int t_idx = rng.uniform_int(0, 3);
+            r.title = junta_titles[t_idx];
+            r.name  = std::string(junta_titles[t_idx]) + " " + first_names[fn_idx] + " " + last_names[ln_idx];
+        } else if (gov == GovForm::THEOCRACY) {
+            int t_idx = rng.uniform_int(0, 3);
+            r.title = theocratic_titles[t_idx];
+            r.name  = std::string(theocratic_titles[t_idx]) + " " + first_names[fn_idx];
+        } else if (gov == GovForm::DICTATORSHIP) {
+            int t_idx = rng.uniform_int(0, 3);
+            r.title = autocratic_titles[t_idx];
+            r.name  = std::string(autocratic_titles[t_idx]) + " " + first_names[fn_idx] + " " + last_names[ln_idx];
+        } else if (gov == GovForm::EMPIRE) {
+            int t_idx = rng.uniform_int(0, 3);
+            r.title = imperial_titles[t_idx];
+            r.name  = std::string(imperial_titles[t_idx]) + " " + first_names[fn_idx] + " " + roman[r_idx];
+        } else {
+            // Monarchy / default
+            int t_idx = rng.uniform_int(0, 3);
+            r.title = royal_titles[t_idx];
+            r.name  = std::string(royal_titles[t_idx]) + " " + first_names[fn_idx] + " " + roman[r_idx];
+        }
     } else {
-        r.title = "High Sovereign";
+        r.title = (gov == GovForm::REPUBLIC || gov == GovForm::DEMOCRACY) ? "President" : "High Sovereign";
         r.name  = name;
     }
 
@@ -466,6 +516,7 @@ void AeonEngine::tick_one_year() {
     // 8. Markets & Religions
     market_engine.tick_year(civs, year);
     religion_engine.tick_year(*this);
+    chronicler.update_eras(*this, year);
     chronicler.update_chronicle(history, year);
     coalition_engine.check_automatic_coalition_formation(*this, year);
     caravan_engine.update_caravans(1.0f, *this);
@@ -548,6 +599,14 @@ void AeonEngine::apply_decision(int civ_idx, const AIDecision& dec) {
         runtime.record(*this, "REJECTED", civ_idx, dec.target_civ, "Actor does not exist");
         return;
     }
+    // Defense-in-depth: Strict self-target rejection
+    if (dec.target_civ == civ_idx && (dec.action_type == "DECLARE_WAR" ||
+                                      dec.action_type == "FORM_ALLIANCE" ||
+                                      dec.action_type == "PROPOSE_TRADE" ||
+                                      dec.action_type == "NEGOTIATE_PEACE")) {
+        runtime.record(*this, "REJECTED", civ_idx, dec.target_civ, "Cannot target self");
+        return;
+    }
     auto& civ = civs[civ_idx];
 
     const std::unordered_map<int, int> empty_cooldowns;
@@ -565,9 +624,10 @@ void AeonEngine::apply_decision(int civ_idx, const AIDecision& dec) {
     }
     const auto before = world_metrics(*this);
 
-    if (dec.action_type == "DECLARE_WAR" && dec.target_civ >= 0 && dec.target_civ < (int)civs.size()) {
+    if (dec.action_type == "DECLARE_WAR" && dec.target_civ >= 0 && dec.target_civ < (int)civs.size() && dec.target_civ != civ_idx) {
         auto& target = civs[dec.target_civ];
-        if (!civ.at_war && !target.at_war && target.is_alive > 0.0f) {
+        if (!civ.at_war && !target.at_war && target.is_alive > 0.0f &&
+            !civ.is_under_truce_with(dec.target_civ, year) && !target.is_under_truce_with(civ_idx, year)) {
             civ.at_war         = true;
             civ.war_with_civ   = dec.target_civ;
             civ.war_year_start = year;
@@ -605,7 +665,7 @@ void AeonEngine::apply_decision(int civ_idx, const AIDecision& dec) {
                 "War: " + civ.name + " vs " + target.name,
                 civ_idx, dec.target_civ, dec.duration_years});
         }
-    } else if (dec.action_type == "FORM_ALLIANCE" && dec.target_civ >= 0 && dec.target_civ < (int)civs.size()) {
+    } else if (dec.action_type == "FORM_ALLIANCE" && dec.target_civ >= 0 && dec.target_civ < (int)civs.size() && dec.target_civ != civ_idx) {
         auto& target = civs[dec.target_civ];
         if (target.is_alive > 0.0f && !civ.at_war && !target.at_war) {
             civ.relations[dec.target_civ] = DiplomacyStatus::ALLY;
@@ -626,7 +686,7 @@ void AeonEngine::apply_decision(int civ_idx, const AIDecision& dec) {
                 dec.declaration, civ_idx, dec.target_civ,
                 {"diplomatic_affinity", "shared_defense"}, 0.70f);
         }
-    } else if (dec.action_type == "PROPOSE_TRADE" && dec.target_civ >= 0 && dec.target_civ < (int)civs.size()) {
+    } else if (dec.action_type == "PROPOSE_TRADE" && dec.target_civ >= 0 && dec.target_civ < (int)civs.size() && dec.target_civ != civ_idx) {
         auto& target = civs[dec.target_civ];
         if (target.is_alive > 0.0f && !civ.at_war && !target.at_war) {
             // Establish 10-year bilateral trade agreement
@@ -652,22 +712,8 @@ void AeonEngine::apply_decision(int civ_idx, const AIDecision& dec) {
                 dec.declaration, civ_idx, dec.target_civ,
                 {"commercial_interests", "mutual_benefit"}, 0.50f);
         }
-    } else if (dec.action_type == "NEGOTIATE_PEACE") {
-        auto& target = civs[dec.target_civ];
-        civ.at_war = target.at_war = false;
-        civ.war_with_civ = target.war_with_civ = -1;
-        civ.relations[dec.target_civ] = DiplomacyStatus::NEUTRAL;
-        target.relations[civ_idx] = DiplomacyStatus::NEUTRAL;
-        history.relation(civ_idx, dec.target_civ).record_treaty();
-        history.relation(civ_idx, dec.target_civ).last_interaction_year = year;
-        active_events.erase(std::remove_if(active_events.begin(), active_events.end(),
-            [&](const ActiveEvent& event) {
-                return event.type == "WAR" &&
-                    ((event.civ_id == civ_idx && event.civ2_id == dec.target_civ) ||
-                     (event.civ_id == dec.target_civ && event.civ2_id == civ_idx));
-            }), active_events.end());
-        history.record(year, month, "DIPLOMACY", civ.name + " and " + target.name + " agree to peace",
-            dec.declaration, civ_idx, dec.target_civ, {"negotiated_peace"}, 0.7f);
+    } else if (dec.action_type == "NEGOTIATE_PEACE" && dec.target_civ >= 0 && dec.target_civ < (int)civs.size() && dec.target_civ != civ_idx) {
+        resolve_peace_conference(civ_idx, dec.target_civ, year);
     } else if (dec.action_type == "BUILD_MILITARY") {
         float cost = 40.0f;
         civ.economy.annual_income = std::max(0.0f, civ.economy.annual_income - cost);
@@ -707,8 +753,14 @@ void AeonEngine::apply_decision(int civ_idx, const AIDecision& dec) {
 //  check_war_resolution
 // ─────────────────────────────────────────────────────────────────────────────
 void AeonEngine::check_war_resolution(int current_year) {
+    std::set<std::pair<int, int>> resolved_pairs;
     for (auto& civ : civs) {
         if (!civ.at_war || civ.war_with_civ < 0 || civ.war_with_civ >= (int)civs.size()) continue;
+        if (civ.war_with_civ == civ.id) {
+            civ.at_war = false;
+            civ.war_with_civ = -1;
+            continue;
+        }
 
         auto& enemy = civs[civ.war_with_civ];
         if (enemy.is_alive <= 0.0f) {
@@ -716,6 +768,9 @@ void AeonEngine::check_war_resolution(int current_year) {
             civ.war_with_civ = -1;
             continue;
         }
+
+        auto pair_key = std::make_pair(std::min(civ.id, enemy.id), std::max(civ.id, enemy.id));
+        if (resolved_pairs.count(pair_key)) continue;
 
         if (civ.id < enemy.id) {
             civ.military_power  = civ.army_size * 0.12f;
@@ -736,38 +791,211 @@ void AeonEngine::check_war_resolution(int current_year) {
         float roll = float((current_year * 17 + civ.id * 31) % 100) / 100.0f;
 
         if (roll < end_chance && war_duration >= 2) {
-            int other_id = civ.war_with_civ;
-            int war_dur  = war_duration;
-            civ.at_war = false;
-            civ.relations[other_id] = DiplomacyStatus::RIVAL;
-            if (other_id >= 0 && other_id < (int)civs.size()) {
-                civs[other_id].at_war = false;
-                civs[other_id].relations[civ.id] = DiplomacyStatus::RIVAL;
-            }
-
-            history.relation(civ.id, other_id).record_treaty();
-            history.relation(civ.id, other_id).last_interaction_year = current_year;
-
-            if (civ.army_size > enemy.army_size * 1.2f) {
-                history.relation(civ.id, other_id).record_victory_for_a();
-                history.relation(other_id, civ.id).record_defeat_for_a();
-            } else if (enemy.army_size > civ.army_size * 1.2f) {
-                history.relation(civ.id, other_id).record_defeat_for_a();
-                history.relation(other_id, civ.id).record_victory_for_a();
-            }
-
-            history.record(current_year, month, "WAR",
-                "Peace treaty: " + civ.name + " and " + (other_id >= 0 ? civs[other_id].name : "unknown"),
-                "After " + std::to_string(war_dur) + " years of conflict, an armistice is signed.",
-                civ.id, other_id,
-                {"war_exhaustion", "economic_strain"}, 0.75f);
-
-            active_events.erase(std::remove_if(active_events.begin(), active_events.end(),
-                [&](const ActiveEvent& e) {
-                    return e.type == "WAR" && (e.civ_id == civ.id || e.civ2_id == civ.id);
-                }), active_events.end());
+            resolved_pairs.insert(pair_key);
+            resolve_peace_conference(civ.id, enemy.id, current_year);
         }
     }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  resolve_peace_conference
+// ─────────────────────────────────────────────────────────────────────────────
+void AeonEngine::resolve_peace_conference(int civ1_id, int civ2_id, int current_year) {
+    if (civ1_id < 0 || civ1_id >= (int)civs.size() || civ2_id < 0 || civ2_id >= (int)civs.size()) return;
+    if (civ1_id == civ2_id) return; // Strict rejection of self-peace
+    auto& c1 = civs[civ1_id];
+    auto& c2 = civs[civ2_id];
+    if (c1.is_alive <= 0.0f || c2.is_alive <= 0.0f) return;
+
+    // Must be actively at war with each other
+    bool at_war_bilateral = (c1.at_war && c1.war_with_civ == civ2_id) ||
+                            (c2.at_war && c2.war_with_civ == civ1_id) ||
+                            (c1.relations[civ2_id] == DiplomacyStatus::AT_WAR) ||
+                            (c2.relations[civ1_id] == DiplomacyStatus::AT_WAR);
+    if (!at_war_bilateral) {
+        return;
+    }
+
+    int occ_by_1 = 0;
+    int occ_by_2 = 0;
+    for (const auto& p : c2.provinces) if (p.is_occupied && p.occupier_civ_id == civ1_id) occ_by_1++;
+    for (const auto& p : c1.provinces) if (p.is_occupied && p.occupier_civ_id == civ2_id) occ_by_2++;
+
+    float score_1 = (occ_by_1 - occ_by_2) * 30.0f + (c1.army_size - c2.army_size) * 0.05f + (c2.war_exhaustion - c1.war_exhaustion) * 0.5f;
+
+    int victor_id = -1;
+    int defeated_id = -1;
+    if (score_1 > 10.0f) {
+        victor_id = civ1_id;
+        defeated_id = civ2_id;
+    } else if (score_1 < -10.0f) {
+        victor_id = civ2_id;
+        defeated_id = civ1_id;
+    }
+
+    int negotiation_rounds = 4 + (current_year % 3);
+    int truce_years = 15;
+
+    PeaceTreaty treaty;
+    treaty.year_signed = current_year;
+    treaty.truce_duration_years = truce_years;
+    treaty.negotiation_rounds = negotiation_rounds;
+
+    // Clean venue naming
+    std::string venue = c1.provinces.empty() ? c1.name : c1.provinces[0].name;
+    while (!venue.empty() && (venue.back() == ' ' || venue.back() == ',')) venue.pop_back();
+    std::string venue_upper = venue;
+    std::transform(venue_upper.begin(), venue_upper.end(), venue_upper.begin(), ::toupper);
+    treaty.treaty_name = "TREATY OF " + venue_upper + " — " + std::to_string(current_year);
+
+    if (victor_id >= 0 && defeated_id >= 0) {
+        auto& victor = civs[victor_id];
+        auto& defeated = civs[defeated_id];
+        treaty.victor_civ_id = victor_id;
+        treaty.defeated_civ_id = defeated_id;
+
+        // Cede up to 1-2 occupied provinces to victor
+        std::vector<int> ceded_pids;
+        for (auto it = defeated.provinces.begin(); it != defeated.provinces.end(); ) {
+            if (it->is_occupied && it->occupier_civ_id == victor_id && (int)ceded_pids.size() < 2) {
+                Province ceded = *it;
+                ceded.civ_id = victor_id;
+                ceded.is_occupied = false;
+                ceded.occupier_civ_id = -1;
+                ceded.occupation_resistance = 25.0f;
+                ceded.stability = 60.0f;
+
+                treaty.ceded_province_ids.push_back(ceded.id);
+                treaty.ceded_province_names.push_back(ceded.name);
+                victor.provinces.push_back(ceded);
+
+                it = defeated.provinces.erase(it);
+            } else {
+                ++it;
+            }
+        }
+
+        // Liberate any remaining occupied provinces
+        for (auto& p : defeated.provinces) {
+            if (p.is_occupied) {
+                p.is_occupied = false;
+                p.occupier_civ_id = -1;
+                p.occupation_resistance = 0.0f;
+            }
+        }
+        for (auto& p : victor.provinces) {
+            if (p.is_occupied) {
+                p.is_occupied = false;
+                p.occupier_civ_id = -1;
+                p.occupation_resistance = 0.0f;
+            }
+        }
+
+        // War Reparations (dynamic scaling based on GDP and war exhaustion, not hardcoded $300B)
+        float reparations = std::clamp(defeated.economy.gdp * 0.12f, 10.0f, 150.0f);
+        reparations = std::min(reparations, defeated.economy.gdp * 0.25f);
+        defeated.economy.gdp = std::max(40.0f, defeated.economy.gdp - reparations);
+        victor.economy.gdp += reparations;
+        treaty.reparations_total = reparations;
+
+        // Revanchism & historical memory
+        for (size_t pi = 0; pi < treaty.ceded_province_names.size(); ++pi) {
+            defeated.bilateral_relations[victor_id].border_claim_score = std::min(100.0f, defeated.bilateral_relations[victor_id].border_claim_score + 40.0f);
+            defeated.bilateral_relations[victor_id].provinces_lost++;
+            victor.bilateral_relations[defeated_id].provinces_taken++;
+        }
+        defeated.bilateral_relations[victor_id].hatred = std::min(100.0f, defeated.bilateral_relations[victor_id].hatred + 25.0f);
+        victor.bilateral_relations[defeated_id].respect = std::max(10.0f, victor.bilateral_relations[defeated_id].respect - 10.0f);
+
+        victor.history_memory.recent_victory_year = current_year;
+        defeated.history_memory.recent_defeat_year = current_year;
+        history.relation(victor_id, defeated_id).record_victory_for_a();
+        history.relation(defeated_id, victor_id).record_defeat_for_a();
+
+        std::cout << "\n========================================================================\n";
+        std::cout << "  🕊️ PEACE CONFERENCE: " << treaty.treaty_name << "\n";
+        std::cout << "========================================================================\n";
+        std::cout << "  Victorious Realm  : " << victor.name << " [ID:" << victor_id << "]\n";
+        std::cout << "  Conceding Realm   : " << defeated.name << " [ID:" << defeated_id << "]\n";
+        std::cout << "  Negotiation Rounds: " << negotiation_rounds << "\n";
+        if (!treaty.ceded_province_names.empty()) {
+            std::cout << "  Territory Ceded   : ";
+            for (size_t i = 0; i < treaty.ceded_province_names.size(); ++i) {
+                std::cout << treaty.ceded_province_names[i] << (i + 1 < treaty.ceded_province_names.size() ? ", " : "\n");
+            }
+        } else {
+            std::cout << "  Territory Ceded   : None (Status Quo Borders)\n";
+        }
+        std::cout << "  War Reparations   : $" << int(reparations) << "B gold paid to " << victor.name << "\n";
+        std::cout << "  Peace Guarantee   : " << truce_years << " Years (Truce active until " << (current_year + truce_years) << ")\n";
+        std::cout << "========================================================================\n\n";
+
+        std::string cede_desc = treaty.ceded_province_names.empty() ? "Status quo borders." : "Territory ceded.";
+        history.record(current_year, month, "PEACE_TREATY",
+            treaty.treaty_name + " concludes war between " + victor.name + " and " + defeated.name,
+            victor.name + " emerges victorious. Reparations: $" + std::to_string(int(reparations)) + "B. " + cede_desc +
+            " Peace guaranteed for " + std::to_string(truce_years) + " years.",
+            victor_id, defeated_id, {"peace_conference", "treaty_signed"}, 0.90f);
+    } else {
+        // Inconclusive / White Peace
+        treaty.is_white_peace = true;
+        for (auto& p : c1.provinces) { p.is_occupied = false; p.occupier_civ_id = -1; p.occupation_resistance = 0.0f; }
+        for (auto& p : c2.provinces) { p.is_occupied = false; p.occupier_civ_id = -1; p.occupation_resistance = 0.0f; }
+
+        std::cout << "\n========================================================================\n";
+        std::cout << "  🕊️ PEACE CONFERENCE: " << treaty.treaty_name << " (WHITE PEACE)\n";
+        std::cout << "========================================================================\n";
+        std::cout << "  Belligerents      : " << c1.name << " [ID:" << civ1_id << "] vs " << c2.name << " [ID:" << civ2_id << "] (Inconclusive)\n";
+        std::cout << "  Negotiation Rounds: " << negotiation_rounds << "\n";
+        std::cout << "  Territorial Terms : Mutual Return of Occupied Lands (Status Quo Ante Bellum)\n";
+        std::cout << "  Peace Guarantee   : " << truce_years << " Years (Truce active until " << (current_year + truce_years) << ")\n";
+        std::cout << "========================================================================\n\n";
+
+        history.record(current_year, month, "PEACE_TREATY",
+            treaty.treaty_name + " (Armistice): " + c1.name + " and " + c2.name,
+            "Both realms exhaust war capacity. White peace signed with mutual return of captured territory. "
+            "Peace guaranteed for " + std::to_string(truce_years) + " years.",
+            civ1_id, civ2_id, {"white_peace", "treaty_signed"}, 0.80f);
+    }
+
+    // Set truces and store treaty records
+    c1.signed_treaties.push_back(treaty);
+    c2.signed_treaties.push_back(treaty);
+    c1.bilateral_relations[civ2_id].truce_until_year = current_year + truce_years;
+    c2.bilateral_relations[civ1_id].truce_until_year = current_year + truce_years;
+    c1.bilateral_relations[civ2_id].wars_fought++;
+    c2.bilateral_relations[civ1_id].wars_fought++;
+
+    // Reset war states
+    c1.at_war = false;
+    c1.war_with_civ = -1;
+    c1.relations[civ2_id] = DiplomacyStatus::NEUTRAL;
+    c2.at_war = false;
+    c2.war_with_civ = -1;
+    c2.relations[civ1_id] = DiplomacyStatus::NEUTRAL;
+
+    // Synchronize All Allied Belligerents to prevent war re-entry!
+    for (auto& other_civ : civs) {
+        if (other_civ.id == civ1_id || other_civ.id == civ2_id) continue;
+        if (other_civ.at_war && (other_civ.war_with_civ == civ1_id || other_civ.war_with_civ == civ2_id)) {
+            other_civ.at_war = false;
+            other_civ.war_with_civ = -1;
+            other_civ.relations[civ1_id] = DiplomacyStatus::NEUTRAL;
+            other_civ.relations[civ2_id] = DiplomacyStatus::NEUTRAL;
+            other_civ.bilateral_relations[civ1_id].truce_until_year = current_year + truce_years;
+            other_civ.bilateral_relations[civ2_id].truce_until_year = current_year + truce_years;
+            c1.bilateral_relations[other_civ.id].truce_until_year = current_year + truce_years;
+            c2.bilateral_relations[other_civ.id].truce_until_year = current_year + truce_years;
+        }
+    }
+
+    // Remove active WAR events
+    active_events.erase(std::remove_if(active_events.begin(), active_events.end(),
+        [&](const ActiveEvent& e) {
+            return e.type == "WAR" &&
+                ((e.civ_id == civ1_id && e.civ2_id == civ2_id) ||
+                 (e.civ_id == civ2_id && e.civ2_id == civ1_id));
+        }), active_events.end());
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

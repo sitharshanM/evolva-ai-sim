@@ -15,6 +15,7 @@ void AeonDynastyEngine::init_dynasties(const AeonEngine& engine) {
 
     for (const auto& civ : engine.civs) {
         if (civ.is_commons) continue;
+        if (civ.government != GovForm::MONARCHY && civ.government != GovForm::EMPIRE) continue;
         RoyalPerson crown_prince;
         crown_prince.id = (int)royals.size() + 1;
         crown_prince.civ_id = civ.id;
@@ -31,9 +32,27 @@ void AeonDynastyEngine::init_dynasties(const AeonEngine& engine) {
 void AeonDynastyEngine::arrange_royal_marriage(int civ1_id, int civ2_id, AeonEngine& engine) {
     if (civ1_id < 0 || civ1_id >= (int)engine.civs.size()) return;
     if (civ2_id < 0 || civ2_id >= (int)engine.civs.size()) return;
+    if (civ1_id == civ2_id) return; // Strict rejection of self-marriage
 
     auto& civ1 = engine.civs[civ1_id];
     auto& civ2 = engine.civs[civ2_id];
+
+    if (civ1.is_alive <= 0.0f || civ2.is_alive <= 0.0f) return;
+    if (civ1.is_commons || civ2.is_commons) return;
+
+    // Royal marriages are only valid for dynastic forms of government (Monarchy / Empire)
+    if ((civ1.government != GovForm::MONARCHY && civ1.government != GovForm::EMPIRE) ||
+        (civ2.government != GovForm::MONARCHY && civ2.government != GovForm::EMPIRE)) {
+        return;
+    }
+
+    // Deduplication: prevent repeat marriages between the same houses
+    for (const auto& m : dynastic_marriages) {
+        if ((m.civ1_id == civ1_id && m.civ2_id == civ2_id) ||
+            (m.civ1_id == civ2_id && m.civ2_id == civ1_id)) {
+            return;
+        }
+    }
 
     DynasticAlliance da;
     da.civ1_id = civ1_id;
@@ -45,10 +64,10 @@ void AeonDynastyEngine::arrange_royal_marriage(int civ1_id, int civ2_id, AeonEng
 
     engine.history.record(engine.year, engine.month, "DYNASTY",
         "Royal Marriage Sealed: " + civ1.name + " & " + civ2.name,
-        "Dynastic blood alliance guarantees non-aggression and royal trade privileges.", civ1_id);
+        "Dynastic blood alliance guarantees non-aggression and royal trade privileges.", civ1_id, civ2_id);
 
-    std::cout << "[YEAR " << engine.year << "] 👑 ROYAL MARRIAGE: House of " << civ1.name
-              << " unites with House of " << civ2.name << "!" << std::endl;
+    std::cout << "[YEAR " << engine.year << "] 👑 ROYAL MARRIAGE: House of " << civ1.name << " [ID:" << civ1_id << "]"
+              << " unites with House of " << civ2.name << " [ID:" << civ2_id << "]!" << std::endl;
 }
 
 void AeonDynastyEngine::update_dynasties_tick(AeonEngine& engine) {
