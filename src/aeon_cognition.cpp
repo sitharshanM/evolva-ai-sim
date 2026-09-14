@@ -64,6 +64,7 @@ NationCognition deliberate(const NationObservation& o, const NationCognition* pr
         float fatigue = 0;
         const auto used = o.last_actions.find(action);
         if (used != o.last_actions.end()) fatigue = std::max(0, 4 - (o.year-used->second)) * 0.06f;
+        p.fatigue_penalty = fatigue;
         p.score = std::clamp(benefit - risk*(1-o.risk_tolerance)*0.7f - fatigue, 0.0f, 1.0f);
         p.decision.utility_score = p.score;
         p.decision.confidence = std::clamp(0.5f + o.competence*0.3f - risk*0.25f, 0.0f, 1.0f);

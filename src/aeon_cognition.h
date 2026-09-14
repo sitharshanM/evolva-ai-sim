@@ -32,6 +32,8 @@ struct CabinetProposal {
     AIDecision decision;
     std::string advisor, critique;
     float benefit = 0, risk = 0, score = 0;
+    float fatigue_penalty = 0;
+    std::string rejection_reason;
 };
 struct StrategyObjective { int horizon = 1; std::string objective; float progress = 0; };
 struct NationCognition {

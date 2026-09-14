@@ -120,12 +120,13 @@ void SimulationRuntime::think(AeonEngine& e) {
         auto& c=cognition[i];
         c=parallel_advisors?jobs[k].get():deliberate(o,&c);
         c.selected=AIDecision{};
-        for(const auto& p:c.proposals) {
+        for(auto& p:c.proposals) {
             std::string reason;
             if(ActionValidator::validate(p.decision,e.civs[i],e.civs,e.year,
                 e.ai_controllers[i].war_cooldown_,e.ai_controllers[i].trade_cooldown_,reason)) {
                 c.selected=p.decision;break;
             }
+            p.rejection_reason=reason;
         }
         e.ai_controllers[i].last_decision_log=explain(i);
         SimulationCommand cmd;cmd.actor=i;cmd.source=CommandSource::AI;cmd.proposal=c.selected;

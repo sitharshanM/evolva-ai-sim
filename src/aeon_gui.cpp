@@ -204,6 +204,7 @@ void AeonGUI::render_frame(AeonEngine& engine) {
             if (ImGui::BeginTabItem("National Policies"))        { draw_policies_tab(engine); ImGui::EndTabItem(); }
         }
         else if (active_category_ == 1) { // DEF: Defense & Tech
+            if (ImGui::BeginTabItem("Cabinet & Cognition"))      { draw_cognition_tab(engine); ImGui::EndTabItem(); }
             if (ImGui::BeginTabItem("AI Agent & Governor"))      { draw_agent_control_tab(engine); ImGui::EndTabItem(); }
             if (ImGui::BeginTabItem("Provinces, Command & Treaties")) { draw_sovereignty_tab(engine); ImGui::EndTabItem(); }
             if (ImGui::BeginTabItem("Military & Logistics"))     { draw_military_logistics_tab(engine); ImGui::EndTabItem(); }
@@ -2884,6 +2885,143 @@ void AeonGUI::draw_sovereignty_tab(AeonEngine& engine) {
             ImGui::Separator();
             ImGui::TextWrapped("%s: %d wars | Taken %d / Lost %d | Claims %.0f | War memory %.0f%s", other.name.c_str(), r.wars_fought, r.provinces_taken, r.provinces_lost, r.border_claim_score, r.war_memory_weight, c.is_under_truce_with(other.id, engine.year) ? " | Truce active" : "");
         }
+    }
+    ImGui::EndChild();
+}
+} // namespace Aeon
+
+namespace Aeon {
+void AeonGUI::draw_cognition_tab(AeonEngine& engine) {
+    ImGui::BeginChild("CognitionScroll");
+    if (engine.civs.empty()) {
+        ImGui::TextUnformatted("No nations available.");
+        ImGui::EndChild();
+        return;
+    }
+    selected_civ_id_ = std::clamp(selected_civ_id_, 0, (int)engine.civs.size() - 1);
+    if (ImGui::BeginCombo("Nation##cabinet", engine.civs[selected_civ_id_].name.c_str())) {
+        for (int i = 0; i < (int)engine.civs.size(); ++i) {
+            ImGui::PushID(i);
+            if (ImGui::Selectable(engine.civs[i].name.c_str(), selected_civ_id_ == i)) selected_civ_id_ = i;
+            ImGui::PopID();
+        }
+        ImGui::EndCombo();
+    }
+    const auto& nation = engine.civs[selected_civ_id_];
+    const auto found = engine.runtime.cognition.find(selected_civ_id_);
+    if (found == engine.runtime.cognition.end()) {
+        ImGui::TextWrapped("No recorded cabinet session for this nation. Advance the simulation with the runtime enabled. Player-controlled nations do not run autonomous cabinet sessions.");
+        ImGui::EndChild();
+        return;
+    }
+    const auto& live = found->second;
+    ImGui::Text("Last cabinet session: %d | World year: %d", live.observation.year, engine.year);
+    ImGui::TextWrapped("Ruler: %s | Doctrine: %s", live.observation.ruler.c_str(), live.observation.ideology.c_str());
+    if (cognition_preview_nation_ != selected_civ_id_) {
+        cognition_preview_nation_ = selected_civ_id_;
+        cognition_preview_ = false;
+    }
+    if (ImGui::Checkbox("Personality what-if preview", &cognition_preview_) && cognition_preview_) {
+        preview_aggression_ = live.observation.aggression;
+        preview_competence_ = live.observation.competence;
+        preview_risk_ = live.observation.risk_tolerance;
+    }
+    NationCognition preview;
+    if (cognition_preview_) {
+        ImGui::TextWrapped("Preview uses the last observation. It does not change ruler traits or execute actions. Feasibility is not evaluated in this preview. Live risk tolerance is derived from aggression; competence affects decision confidence.");
+        ImGui::SliderFloat("Aggression", &preview_aggression_, 0, 1, "%.2f");
+        ImGui::SliderFloat("Competence", &preview_competence_, 0, 1, "%.2f");
+        ImGui::SliderFloat("Risk tolerance", &preview_risk_, 0, 1, "%.2f");
+        auto observation = live.observation;
+        observation.aggression = preview_aggression_;
+        observation.competence = preview_competence_;
+        observation.risk_tolerance = preview_risk_;
+        preview = deliberate(observation);
+    }
+    const auto& session = cognition_preview_ ? preview : live;
+    auto name_for = [&](int id) -> const char* {
+        if (id < 0) return "Domestic / none";
+        for (const auto& c : engine.civs) if (c.id == id) return c.name.c_str();
+        return "Unknown nation";
+    };
+    ImGui::Separator();
+    ImGui::TextColored(ImVec4(0.35f, 0.9f, 0.65f, 1), "%s: %s", cognition_preview_ ? "Preview top proposal" : "Selected action", session.selected.action_type.c_str());
+    ImGui::TextWrapped("Target: %s | Utility %.3f | Confidence %.0f%%", name_for(session.selected.target_civ), session.selected.utility_score, session.selected.confidence * 100);
+    ImGui::TextWrapped("%s", session.selected.reasoning.c_str());
+    ImGui::TextWrapped("Utility = clamp(benefit - risk x (1 - risk tolerance) x 0.7 - fatigue, 0, 1). Live selection takes the first feasible proposal in ranked order. Ties use action name then target ID. Selection does not guarantee execution.");
+    if (ImGui::CollapsingHeader("Ranked cabinet proposals", ImGuiTreeNodeFlags_DefaultOpen)) {
+        ImGui::TextWrapped("Advisors only propose actions when their conditions apply. Rejected rows show the reason recorded at decision time.");
+        if (ImGui::BeginTable("CabinetProposals", 9, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_Resizable | ImGuiTableFlags_ScrollX)) {
+            for (const char* label : {"Advisor", "Action / Target", "Benefit", "Risk", "Fatigue", "Utility", "Confidence", "Selection", "Advisor critique"}) ImGui::TableSetupColumn(label);
+            ImGui::TableHeadersRow();
+            for (const auto& p : session.proposals) {
+                const bool winner = p.decision.action_type == session.selected.action_type && p.decision.target_civ == session.selected.target_civ;
+                ImGui::TableNextRow();
+                if (winner) ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg0, IM_COL32(30, 85, 65, 180));
+                ImGui::TableSetColumnIndex(0); ImGui::TextWrapped("%s", p.advisor.c_str());
+                ImGui::TableSetColumnIndex(1); ImGui::TextWrapped("%s / %s", p.decision.action_type.c_str(), name_for(p.decision.target_civ));
+                ImGui::TableSetColumnIndex(2); ImGui::Text("%.3f", p.benefit);
+                ImGui::TableSetColumnIndex(3); ImGui::Text("%.3f", p.risk);
+                ImGui::TableSetColumnIndex(4); ImGui::Text("%.3f", p.fatigue_penalty);
+                ImGui::TableSetColumnIndex(5); ImGui::Text("%.3f", p.score);
+                ImGui::TableSetColumnIndex(6); ImGui::Text("%.0f%%", p.decision.confidence * 100);
+                ImGui::TableSetColumnIndex(7); ImGui::TextWrapped("%s", winner ? (cognition_preview_ ? "Preview top" : "Selected") : !p.rejection_reason.empty() ? p.rejection_reason.c_str() : "Not selected");
+                ImGui::TableSetColumnIndex(8); ImGui::TextWrapped("%s", p.critique.c_str());
+            }
+            ImGui::EndTable();
+        }
+    }
+    if (ImGui::CollapsingHeader("Intelligence: perception versus reality", ImGuiTreeNodeFlags_DefaultOpen)) {
+        ImGui::TextWrapped("Army perceptions are from the last cabinet session. Actual values are current observer-only data, not information provided to advisors. Rival GDP estimates are not modeled.");
+        if (ImGui::BeginTable("PerceptionMatrix", 6, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_Resizable)) {
+            for (const char* label : {"Rival", "Army estimate", "Confidence / Year", "Actual army", "Actual GDP", "Knowledge"}) ImGui::TableSetupColumn(label);
+            ImGui::TableHeadersRow();
+            for (const auto& p : live.observation.nations) {
+                ImGui::TableNextRow();
+                ImGui::TableSetColumnIndex(0); ImGui::TextWrapped("%s", p.name.c_str());
+                ImGui::TableSetColumnIndex(1);
+                if (p.army.knowledge == Knowledge::UNKNOWN) ImGui::TextUnformatted("Unknown"); else ImGui::Text("%.0f", p.army.value);
+                ImGui::TableSetColumnIndex(2);
+                if (p.army.knowledge == Knowledge::UNKNOWN) ImGui::TextUnformatted("N/A"); else ImGui::Text("%.0f%% / %d", p.army.confidence * 100, p.army.observed_year);
+                const auto actual = std::find_if(engine.civs.begin(), engine.civs.end(), [&](const auto& c) { return c.id == p.id; });
+                ImGui::TableSetColumnIndex(3); if (actual != engine.civs.end()) ImGui::Text("%.0f", actual->army_size); else ImGui::TextUnformatted("Unavailable");
+                ImGui::TableSetColumnIndex(4); if (actual != engine.civs.end()) ImGui::Text("%.0f", actual->economy.gdp); else ImGui::TextUnformatted("Unavailable");
+                ImGui::TableSetColumnIndex(5); ImGui::TextUnformatted(p.army.knowledge == Knowledge::KNOWN ? "Known" : p.army.knowledge == Knowledge::BELIEVED ? "Believed" : "Unknown");
+            }
+            ImGui::EndTable();
+        }
+    }
+    if (ImGui::CollapsingHeader("Current diplomatic memory")) {
+        bool any = false;
+        for (const auto& rival : engine.civs) {
+            if (rival.id == nation.id || rival.is_commons) continue;
+            const auto* memory = engine.history.relation_view(nation.id, rival.id);
+            if (!memory) continue;
+            any = true;
+            ImGui::PushID(rival.id);
+            ImGui::TextUnformatted(rival.name.c_str());
+            auto gauge = [](const char* label, float value, float low, float high) {
+                char caption[96];
+                snprintf(caption, sizeof(caption), "%s %.1f (%.0f to %.0f)", label, value, low, high);
+                ImGui::ProgressBar(std::clamp((value-low)/(high-low), 0.0f, 1.0f), ImVec2(-1, 0), caption);
+            };
+            gauge("Trust", memory->trust, -100, 100);
+            gauge("Fear", memory->fear, 0, 100);
+            gauge("Hatred", memory->hatred, 0, 100);
+            ImGui::PopID();
+        }
+        if (!any) ImGui::TextUnformatted("No diplomatic memories recorded.");
+    }
+    if (ImGui::CollapsingHeader("Strategic objectives", ImGuiTreeNodeFlags_DefaultOpen)) {
+        ImGui::TextWrapped("Progress is the model's stability-based proxy, not measured completion of each objective.");
+        for (const auto& objective : session.objectives) {
+            ImGui::TextWrapped("%d-year horizon: %s", objective.horizon, objective.objective.c_str());
+            ImGui::ProgressBar(std::clamp(objective.progress, 0.0f, 1.0f), ImVec2(-1, 0));
+        }
+    }
+    if (ImGui::CollapsingHeader("Cabinet memory log")) {
+        ImGui::TextWrapped("Entries record deliberation recommendations, which may differ from the final feasible action.");
+        for (auto it = live.memory.rbegin(); it != live.memory.rend(); ++it) ImGui::TextWrapped("%s", it->c_str());
     }
     ImGui::EndChild();
 }

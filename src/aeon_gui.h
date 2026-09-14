@@ -89,6 +89,10 @@ private:
     void draw_agent_control_tab(AeonEngine& engine);
     void draw_rebellion_tab(AeonEngine& engine);
     void draw_sovereignty_tab(AeonEngine& engine);
+    void draw_cognition_tab(AeonEngine& engine);
+    bool cognition_preview_ = false;
+    int cognition_preview_nation_ = -1;
+    float preview_aggression_ = 0.5f, preview_competence_ = 0.5f, preview_risk_ = 0.5f;
     void draw_nuclear_tab(AeonEngine& engine);
     void draw_space_race_tab(AeonEngine& engine);
     void draw_dynasty_tab(AeonEngine& engine);
